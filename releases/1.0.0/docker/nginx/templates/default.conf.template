@@ -16,13 +16,14 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name ${DOMAIN_FRONTEND};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_FRONTEND}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_FRONTEND}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    include /etc/nginx/options-ssl-nginx.conf;
+    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
 
     location / {
         proxy_pass http://frontend:3000;
@@ -55,13 +56,14 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name ${DOMAIN_BACKEND};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_BACKEND}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_BACKEND}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    include /etc/nginx/options-ssl-nginx.conf;
+    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
 
     client_max_body_size 100M;
 
@@ -104,13 +106,14 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name ${DOMAIN_API_OFICIAL};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_API_OFICIAL}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_API_OFICIAL}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    include /etc/nginx/options-ssl-nginx.conf;
+    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
 
     client_max_body_size 100M;
 

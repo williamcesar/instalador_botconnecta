@@ -156,6 +156,8 @@ async function handleInstall(req, res) {
     exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker-compose.yml" -o docker-compose.yml`);
     exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/nginx.conf" -o docker/nginx/nginx.conf`);
     exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
+    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/options-ssl-nginx.conf" -o docker/nginx/options-ssl-nginx.conf`);
+    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/ssl-dhparams.pem" -o docker/nginx/ssl-dhparams.pem`);
     exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/postgres/init-multiple-dbs.sh" -o docker/postgres/init-multiple-dbs.sh`);
     exec(`chmod +x docker/postgres/init-multiple-dbs.sh`);
 
@@ -169,6 +171,16 @@ async function handleInstall(req, res) {
 
     step('🐳 Baixando imagens Docker do Docker Hub...');
     exec(`docker compose pull`);
+
+    step('🔒 Inicializando certificados de segurança e SSL bootstrap...');
+    const domains = [envVars.DOMAIN_FRONTEND, envVars.DOMAIN_BACKEND, envVars.DOMAIN_API_OFICIAL].filter(Boolean);
+    for (const dom of domains) {
+      try {
+        exec(`docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
+      } catch (sslErr) {
+        log(`Aviso ao criar certificado temporário para ${dom}: ${sslErr.message}`);
+      }
+    }
 
     step('🚀 Subindo containers...');
     exec(`docker compose up -d`);
@@ -192,6 +204,24 @@ async function handleInstall(req, res) {
 
     step('🔄 Executando migrations da API Oficial...');
     exec(`docker compose exec -T api_oficial npx prisma migrate deploy`);
+
+    step('🔒 Solicitando certificados SSL Let\'s Encrypt...');
+    const certEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.MAIL_FROM || ('admin@' + envVars.DOMAIN_FRONTEND);
+    for (const dom of domains) {
+      try {
+        step(`🔒 Emitindo certificado SSL para ${dom}...`);
+        exec(`docker compose run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+      } catch (sslErr) {
+        step(`⚠️ Certbot aviso para ${dom}: ${sslErr.message}`);
+      }
+    }
+
+    step('🔄 Recarregando Nginx com novos certificados...');
+    try {
+      exec(`docker compose exec -T nginx nginx -s reload`);
+    } catch {
+      try { exec(`docker compose restart nginx`); } catch (e) {}
+    }
 
     step('📋 Salvando versão instalada...');
     fs.writeFileSync(VERSION_FILE, version, 'utf8');
