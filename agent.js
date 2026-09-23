@@ -20,7 +20,7 @@ const PORT = process.env.AGENT_PORT || 7443;
 const AGENT_TOKEN = process.env.AGENT_TOKEN;
 const INSTALL_DIR = process.env.INSTALL_DIR || '/opt/botconnecta';
 const BACKUP_DIR = process.env.BACKUP_DIR || '/opt/botconnecta-backups';
-const RELEASES_URL = process.env.RELEASES_URL || 'https://hub.docker.com';
+const RELEASES_URL = process.env.RELEASES_URL || 'https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main';
 const VERSION_FILE = path.join(INSTALL_DIR, '.version');
 
 if (!AGENT_TOKEN) {
