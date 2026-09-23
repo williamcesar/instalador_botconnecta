@@ -1,0 +1,14 @@
+{
+  "name": "botconnecta-agent",
+  "version": "1.0.0",
+  "description": "BotConnecta VPS Agent — Gerencia instalações Docker remotamente",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js",
+    "dev": "node --watch agent.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "UNLICENSED"
+}
