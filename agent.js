@@ -142,6 +142,8 @@ async function handleInstall(req, res) {
     log(msg);
   }
 
+  const releasesUrl = body.releasesUrl || RELEASES_URL || 'https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main';
+
   try {
     // Cria diretórios
     fs.mkdirSync(INSTALL_DIR, { recursive: true });
@@ -151,10 +153,10 @@ async function handleInstall(req, res) {
 
     step('📦 Baixando docker-compose.yml e arquivos de configuração...');
     // Pull do docker-compose.yml do repositório central
-    exec(`curl -fsSL "${RELEASES_URL}/releases/${version}/docker-compose.yml" -o docker-compose.yml`);
-    exec(`curl -fsSL "${RELEASES_URL}/releases/${version}/docker/nginx/nginx.conf" -o docker/nginx/nginx.conf`);
-    exec(`curl -fsSL "${RELEASES_URL}/releases/${version}/docker/nginx/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
-    exec(`curl -fsSL "${RELEASES_URL}/releases/${version}/docker/postgres/init-multiple-dbs.sh" -o docker/postgres/init-multiple-dbs.sh`);
+    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker-compose.yml" -o docker-compose.yml`);
+    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/nginx.conf" -o docker/nginx/nginx.conf`);
+    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
+    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/postgres/init-multiple-dbs.sh" -o docker/postgres/init-multiple-dbs.sh`);
     exec(`chmod +x docker/postgres/init-multiple-dbs.sh`);
 
     step('📝 Criando arquivo .env...');
@@ -173,9 +175,10 @@ async function handleInstall(req, res) {
 
     step('⏳ Aguardando banco de dados...');
     let dbReady = false;
+    const pgUser = envVars.POSTGRES_USER || 'botconnecta';
     for (let i = 0; i < 30; i++) {
       try {
-        exec(`docker compose exec -T postgres pg_isready -U botconnecta`);
+        exec(`docker compose exec -T postgres pg_isready -U ${pgUser}`);
         dbReady = true;
         break;
       } catch {
@@ -370,10 +373,21 @@ async function handleLogs(req, res, service) {
     'Access-Control-Allow-Origin': '*',
   });
 
-  const args = ['compose', 'logs', '--follow', '--tail=100'];
-  if (service) args.push(service);
-
-  const proc = spawn('docker', args, { cwd: INSTALL_DIR });
+  let proc;
+  if (service === 'install') {
+    const logFile = path.join(INSTALL_DIR, 'install.log');
+    if (!fs.existsSync(logFile)) {
+      try {
+        fs.mkdirSync(INSTALL_DIR, { recursive: true });
+        fs.writeFileSync(logFile, '[Aguardando logs de instalação...]\n', 'utf8');
+      } catch (e) {}
+    }
+    proc = spawn('tail', ['-n', '150', '-f', logFile]);
+  } else {
+    const args = ['compose', 'logs', '--follow', '--tail=100'];
+    if (service) args.push(service);
+    proc = spawn('docker', args, { cwd: INSTALL_DIR });
+  }
 
   proc.stdout.on('data', data => {
     res.write(`data: ${JSON.stringify(data.toString())}\n\n`);
