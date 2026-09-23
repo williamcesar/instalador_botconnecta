@@ -54,12 +54,17 @@ function jsonResponse(res, statusCode, data) {
 }
 
 function authenticate(req) {
-  const auth = req.headers['authorization'] || '';
-  const token = auth.replace('Bearer ', '').trim();
-  return crypto.timingSafeEqual(
-    Buffer.from(token),
-    Buffer.from(AGENT_TOKEN)
-  );
+  try {
+    const auth = req.headers['authorization'] || '';
+    const token = auth.replace('Bearer ', '').trim();
+    if (!token || !AGENT_TOKEN) return false;
+    const bufA = Buffer.from(token);
+    const bufB = Buffer.from(AGENT_TOKEN);
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
 }
 
 function readBody(req) {
