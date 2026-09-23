@@ -131,11 +131,13 @@ setup_agent() {
   chown -R "$AGENT_USER:$AGENT_USER" "$AGENT_DIR" "$INSTALL_DIR" "$BACKUP_DIR"
 
   # Instala arquivos do agente
-  AGENT_SCRIPT_URL="${RELEASES_URL:-https://raw.githubusercontent.com/SEU_USUARIO/botconnecta-manager/main}/agent/agent.js"
-  AGENT_PKG_URL="${RELEASES_URL:-https://raw.githubusercontent.com/SEU_USUARIO/botconnecta-manager/main}/agent/package.json"
-
-  curl -fsSL "$AGENT_SCRIPT_URL" -o "$AGENT_DIR/agent.js"
-  curl -fsSL "$AGENT_PKG_URL" -o "$AGENT_DIR/package.json"
+  BASE_REPO="${RELEASES_URL:-https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main}"
+  if curl -fsSL "$BASE_REPO/agent.js" -o "$AGENT_DIR/agent.js" 2>/dev/null; then
+    curl -fsSL "$BASE_REPO/package.json" -o "$AGENT_DIR/package.json" 2>/dev/null || true
+  else
+    curl -fsSL "$BASE_REPO/agent/agent.js" -o "$AGENT_DIR/agent.js"
+    curl -fsSL "$BASE_REPO/agent/package.json" -o "$AGENT_DIR/package.json" || true
+  fi
 
   # Cria arquivo de ambiente
   cat > "$AGENT_DIR/.env" <<EOF
