@@ -1,0 +1,129 @@
+# ==============================================================================
+# FRONTEND — ${DOMAIN_FRONTEND}
+# ==============================================================================
+server {
+    listen 80;
+    server_name ${DOMAIN_FRONTEND};
+
+    # Let's Encrypt challenge
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN_FRONTEND};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN_FRONTEND}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_FRONTEND}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location / {
+        proxy_pass http://frontend:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400s;
+    }
+}
+
+# ==============================================================================
+# BACKEND (API) — ${DOMAIN_BACKEND}
+# ==============================================================================
+server {
+    listen 80;
+    server_name ${DOMAIN_BACKEND};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN_BACKEND};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN_BACKEND}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_BACKEND}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://backend:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400s;
+        proxy_connect_timeout 75s;
+    }
+
+    # Arquivos públicos do backend
+    location /public/ {
+        alias /var/www/backend_public/;
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+}
+
+# ==============================================================================
+# API OFICIAL (WhatsApp Business) — ${DOMAIN_API_OFICIAL}
+# ==============================================================================
+server {
+    listen 80;
+    server_name ${DOMAIN_API_OFICIAL};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN_API_OFICIAL};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN_API_OFICIAL}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_API_OFICIAL}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://api_oficial:6000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400s;
+    }
+}
