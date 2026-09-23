@@ -199,6 +199,33 @@ async function handleInstall(req, res) {
     }
     if (!dbReady) throw new Error('Banco de dados não ficou pronto em 60s');
 
+    step('🔑 Sincronizando credenciais e bancos do PostgreSQL...');
+    const pgPass = envVars.POSTGRES_PASSWORD;
+    const dbName = envVars.DB_NAME || 'botconnecta';
+    const dbOficial = envVars.DB_NAME_OFICIAL || 'botconnecta_oficial';
+    if (pgPass) {
+      try {
+        exec(`docker compose exec -T postgres psql -U ${pgUser} -d template1 -c "ALTER USER \\"${pgUser}\\" WITH PASSWORD '${pgPass}';"`);
+        log('Senha do PostgreSQL sincronizada com o .env');
+      } catch (pwErr) {
+        log(`Aviso ao sincronizar senha do postgres: ${pwErr.message}`);
+      }
+    }
+    try {
+      exec(`docker compose exec -T postgres psql -U ${pgUser} -d template1 -tc "SELECT 1 FROM pg_database WHERE datname = '${dbOficial}'" | grep -q 1 || docker compose exec -T postgres psql -U ${pgUser} -d template1 -c "CREATE DATABASE \\"${dbOficial}\\" OWNER \\"${pgUser}\\";"`);
+      log('Banco oficial verificado/criado com sucesso.');
+    } catch (dbErr) {
+      log(`Aviso ao verificar banco oficial: ${dbErr.message}`);
+    }
+
+    // Reinicia backend e api_oficial para conectarem com a senha sincronizada
+    try {
+      exec(`docker compose restart backend api_oficial`);
+      execSync('sleep 5');
+    } catch (restartErr) {
+      log(`Aviso restart: ${restartErr.message}`);
+    }
+
     step('🔄 Executando migrations do backend...');
     exec(`docker compose exec -T backend npm run db:migrate`);
 
