@@ -208,7 +208,7 @@ services:
   # ── Certbot (SSL Let's Encrypt) ──────────────────────────────────────────────
   certbot:
     image: certbot/certbot:latest
-    container_name: bc_certbot
+    restart: unless-stopped
     volumes:
       - certbot_www:/var/www/certbot
       - certbot_conf:/etc/letsencrypt

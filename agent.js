@@ -89,17 +89,32 @@ function getCurrentVersion() {
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 async function handleHealth(req, res) {
-  const services = ['frontend', 'backend', 'api_oficial', 'api_transcricao', 'postgres', 'redis'];
+  const services = ['frontend', 'backend', 'api_oficial', 'api_transcricao', 'postgres', 'redis', 'nginx'];
   const status = {};
 
   for (const svc of services) {
     try {
       const out = exec(`docker compose ps --format json ${svc}`);
-      const parsed = JSON.parse(out);
+      let item = null;
+      try {
+        const parsed = JSON.parse(out.trim());
+        item = Array.isArray(parsed) ? parsed[0] : parsed;
+      } catch {
+        const firstLine = out.trim().split('\n')[0];
+        if (firstLine) {
+          const parsedLine = JSON.parse(firstLine);
+          item = Array.isArray(parsedLine) ? parsedLine[0] : parsedLine;
+        }
+      }
+
+      const state = (item?.State || item?.state || '').toLowerCase();
+      const health = (item?.Health || item?.health || 'none').toLowerCase();
+      const isRunning = state === 'running';
+
       status[svc] = {
-        running: parsed.State === 'running',
-        state: parsed.State,
-        health: parsed.Health || 'none',
+        running: isRunning,
+        state: state || (isRunning ? 'running' : 'stopped'),
+        health: health,
       };
     } catch {
       status[svc] = { running: false, state: 'stopped', health: 'none' };
@@ -145,6 +160,13 @@ async function handleInstall(req, res) {
   const releasesUrl = body.releasesUrl || RELEASES_URL || 'https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main';
 
   try {
+    step('🧹 Limpando containers e volumes anteriores para instalação limpa...');
+    try {
+      exec(`docker compose down -v`);
+    } catch (cleanErr) {
+      log(`Aviso ao limpar volumes anteriores: ${cleanErr.message}`);
+    }
+
     // Cria diretórios
     fs.mkdirSync(INSTALL_DIR, { recursive: true });
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -229,6 +251,24 @@ async function handleInstall(req, res) {
     step('🔄 Executando migrations do backend...');
     exec(`docker compose exec -T backend npm run db:migrate`);
 
+    step('🌱 Executando seeds iniciais do backend (empresa e configurações)...');
+    try {
+      exec(`docker compose exec -T backend npm run db:seed`);
+    } catch (seedErr) {
+      log(`Aviso seed: ${seedErr.message}`);
+    }
+
+    const adminEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.ADMIN_EMAIL;
+    const adminPass = envVars.API_OFICIAL_ADMIN_PASSWORD || envVars.ADMIN_PASSWORD;
+    if (adminEmail && adminPass) {
+      step(`👤 Configurando usuário administrador inicial (${adminEmail})...`);
+      try {
+        exec(`docker compose exec -T backend node -e "const bcrypt = require('bcryptjs'); const { Sequelize } = require('sequelize'); const s = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, { host: process.env.DB_HOST, dialect: 'postgres', logging: false }); s.query(\\\"UPDATE \\\\\\\"Users\\\\\\\" SET email='${adminEmail}', \\\\\\\"passwordHash\\\\\\\"='\\\" + bcrypt.hashSync('${adminPass}', 8) + \\\"' WHERE id=1;\\\").then(() => { console.log('Admin sincronizado'); process.exit(0); }).catch(e => { console.error(e); process.exit(1); });"`);
+      } catch (adminErr) {
+        log(`Aviso ao sincronizar admin: ${adminErr.message}`);
+      }
+    }
+
     step('🔄 Executando migrations da API Oficial...');
     exec(`docker compose exec -T api_oficial npx prisma migrate deploy`);
 
@@ -237,7 +277,16 @@ async function handleInstall(req, res) {
     for (const dom of domains) {
       try {
         step(`🔒 Emitindo certificado SSL para ${dom}...`);
-        exec(`docker compose run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+        let issued = false;
+        try {
+          exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+          issued = true;
+        } catch (execErr) {
+          log(`Tentando certbot via run: ${execErr.message}`);
+          exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+          issued = true;
+        }
+        if (issued) step(`✅ Certificado SSL emitido com sucesso para ${dom}!`);
       } catch (sslErr) {
         step(`⚠️ Certbot aviso para ${dom}: ${sslErr.message}`);
       }
@@ -459,6 +508,105 @@ async function handleLogs(req, res, service) {
   });
 }
 
+async function handleSsl(req, res) {
+  jsonResponse(res, 202, { ok: true, message: 'Emissão de certificados SSL iniciada' });
+
+  const envPath = path.join(INSTALL_DIR, '.env');
+  let envVars = {};
+  if (fs.existsSync(envPath)) {
+    const raw = fs.readFileSync(envPath, 'utf8');
+    raw.split('\n').forEach(line => {
+      const idx = line.indexOf('=');
+      if (idx > 0) envVars[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+    });
+  }
+  const domains = [envVars.DOMAIN_FRONTEND, envVars.DOMAIN_BACKEND, envVars.DOMAIN_API_OFICIAL].filter(Boolean);
+  const certEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.MAIL_FROM || ('admin@' + (envVars.DOMAIN_FRONTEND || 'botconnecta.com.br'));
+
+  log(`🔒 Iniciando emissão de certificados SSL para: ${domains.join(', ')}`);
+  for (const dom of domains) {
+    try {
+      let issued = false;
+      try {
+        exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+        issued = true;
+      } catch (e1) {
+        exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+        issued = true;
+      }
+      if (issued) log(`✅ Certificado SSL emitido com sucesso para ${dom}`);
+    } catch (err) {
+      log(`❌ Erro ao emitir SSL para ${dom}: ${err.message}`);
+    }
+  }
+
+  try {
+    exec(`docker compose exec -T nginx nginx -s reload`);
+  } catch {
+    try { exec(`docker compose restart nginx`); } catch (e) {}
+  }
+}
+
+async function handleCleanDb(req, res) {
+  jsonResponse(res, 202, { ok: true, message: 'Reset do banco e instalação limpa iniciada' });
+
+  const envPath = path.join(INSTALL_DIR, '.env');
+  let envVars = {};
+  if (fs.existsSync(envPath)) {
+    const raw = fs.readFileSync(envPath, 'utf8');
+    raw.split('\n').forEach(line => {
+      const idx = line.indexOf('=');
+      if (idx > 0) envVars[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+    });
+  }
+
+  try {
+    log('🧹 Reiniciando banco do zero (removendo volumes antigos)...');
+    exec(`docker compose down -v`);
+    exec(`docker compose up -d postgres redis`);
+
+    const pgUser = envVars.POSTGRES_USER || 'botconnecta';
+    for (let i = 0; i < 30; i++) {
+      try {
+        exec(`docker compose exec -T postgres pg_isready -U ${pgUser}`);
+        break;
+      } catch {
+        execSync('sleep 2');
+      }
+    }
+
+    log('🔄 Executando migrations do backend...');
+    exec(`docker compose run --rm backend npm run db:migrate`);
+
+    log('🌱 Executando seeds iniciais...');
+    try {
+      exec(`docker compose run --rm backend npm run db:seed`);
+    } catch (seedErr) {
+      log(`Aviso seed: ${seedErr.message}`);
+    }
+
+    const adminEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.ADMIN_EMAIL;
+    const adminPass = envVars.API_OFICIAL_ADMIN_PASSWORD || envVars.ADMIN_PASSWORD;
+    if (adminEmail && adminPass) {
+      log(`👤 Configurando usuário administrador (${adminEmail})...`);
+      try {
+        exec(`docker compose run --rm backend node -e "const bcrypt = require('bcryptjs'); const { Sequelize } = require('sequelize'); const s = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, { host: process.env.DB_HOST, dialect: 'postgres', logging: false }); s.query(\\\"UPDATE \\\\\\\"Users\\\\\\\" SET email='${adminEmail}', \\\\\\\"passwordHash\\\\\\\"='\\\" + bcrypt.hashSync('${adminPass}', 8) + \\\"' WHERE id=1;\\\").then(() => { console.log('Admin sincronizado'); process.exit(0); }).catch(e => { console.error(e); process.exit(1); });"`);
+      } catch (adminErr) {
+        log(`Aviso ao sincronizar admin: ${adminErr.message}`);
+      }
+    }
+
+    log('🔄 Executando migrations da API Oficial...');
+    exec(`docker compose run --rm api_oficial npx prisma migrate deploy`);
+
+    log('🚀 Subindo todos os containers...');
+    exec(`docker compose up -d`);
+    log('✅ Instalação limpa concluída com sucesso!');
+  } catch (err) {
+    log(`❌ Erro no reset do banco: ${err.message}`);
+  }
+}
+
 // ── Roteador HTTP ─────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -495,6 +643,8 @@ const server = http.createServer(async (req, res) => {
     if (path_ === '/api/start' && method === 'POST') return await handleStart(req, res);
     if (path_ === '/api/backup' && method === 'POST') return await handleBackup(req, res);
     if (path_ === '/api/backups' && method === 'GET') return await handleListBackups(req, res);
+    if (path_ === '/api/ssl' && method === 'POST') return await handleSsl(req, res);
+    if (path_ === '/api/clean-db' && method === 'POST') return await handleCleanDb(req, res);
 
     const logsMatch = path_.match(/^\/api\/logs\/?(.*)$/);
     if (logsMatch && method === 'GET') return await handleLogs(req, res, logsMatch[1]);
