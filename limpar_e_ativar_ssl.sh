@@ -76,9 +76,17 @@ echo -e "${CYAN}=====================================================${NC}"
 docker compose run --rm api_oficial npx prisma migrate deploy
 
 echo -e "${CYAN}=====================================================${NC}"
-echo -e "${CYAN}▶ 10/11. Subindo todos os containers do BotConnecta...${NC}"
+echo -e "${CYAN}▶ 10/12. Gerando certificados bootstrap para inicialização do Nginx...${NC}"
+echo -e "${CYAN}=====================================================${NC}"
+for dom in wa.botconnecta.com.br waapi.botconnecta.com.br waapioficial.botconnecta.com.br; do
+    docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/$dom && openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/$dom/privkey.pem -out /etc/letsencrypt/live/$dom/fullchain.pem -subj '/CN=$dom'"
+done
+
+echo -e "${CYAN}=====================================================${NC}"
+echo -e "${CYAN}▶ 11/12. Subindo todos os containers do BotConnecta...${NC}"
 echo -e "${CYAN}=====================================================${NC}"
 docker compose up -d
+sleep 3
 
 echo -e "${CYAN}=====================================================${NC}"
 echo -e "${CYAN}▶ 11/11. Emitindo certificados SSL oficiais Let's Encrypt...${NC}"
