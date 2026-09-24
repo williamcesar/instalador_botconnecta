@@ -93,7 +93,7 @@ docker compose run --rm backend npm run db:seed
 echo -e "${CYAN}=====================================================${NC}"
 echo -e "${CYAN}▶ 8/11. Configurando usuário administrador do cliente...${NC}"
 echo -e "${CYAN}=====================================================${NC}"
-docker compose run --rm backend node -e "const bcrypt = require('bcryptjs'); const { Sequelize } = require('sequelize'); const s = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, { host: process.env.DB_HOST, dialect: 'postgres', logging: false }); s.query(\"UPDATE \\\"Users\\\" SET email='\" + process.env.ADMIN_EMAIL + \"', \\\"passwordHash\\\"='\" + bcrypt.hashSync(process.env.ADMIN_PASSWORD, 8) + \"' WHERE id=1;\").then(() => { console.log('✓ Admin configurado com sucesso!'); process.exit(0); }).catch(e => { console.error('Erro admin:', e); process.exit(1); });"
+docker compose run --rm -e ADMIN_EMAIL="$ADMIN_EMAIL" -e ADMIN_PASSWORD="$ADMIN_PASSWORD" backend node -e "const bcrypt = require('bcryptjs'); const { Sequelize } = require('sequelize'); const s = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, { host: process.env.DB_HOST, dialect: 'postgres', logging: false }); s.query(\"UPDATE \\\"Users\\\" SET email='\" + process.env.ADMIN_EMAIL + \"', \\\"passwordHash\\\"='\" + bcrypt.hashSync(process.env.ADMIN_PASSWORD, 8) + \"' WHERE id=1;\").then(() => { console.log('✓ Admin configurado com sucesso!'); process.exit(0); }).catch(e => { console.error('Erro admin:', e); process.exit(1); });"
 
 echo -e "${CYAN}=====================================================${NC}"
 echo -e "${CYAN}▶ 9/11. Executando migrations da API Oficial...${NC}"
@@ -113,10 +113,13 @@ echo -e "${CYAN}=====================================================${NC}"
 docker compose up -d
 sleep 5
 
+# Limpa os certificados dummy temporários para o certbot poder criar os oficiais
+docker compose exec -T certbot sh -c "rm -rf /etc/letsencrypt/live/* /etc/letsencrypt/archive/* /etc/letsencrypt/renewal/*" 2>/dev/null || true
+
 for dom in "$DOMAIN_FRONTEND" "$DOMAIN_BACKEND" "$DOMAIN_API_OFICIAL"; do
     echo "Emitindo certificado SSL para $dom..."
-    docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email "$ADMIN_EMAIL" -d "$dom" --agree-tos --no-eff-email --force-renewal --non-interactive || \
-    docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email "$ADMIN_EMAIL" -d "$dom" --agree-tos --no-eff-email --force-renewal --non-interactive || true
+    docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email "$ADMIN_EMAIL" -d "$dom" --agree-tos --no-eff-email --non-interactive || \
+    docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email "$ADMIN_EMAIL" -d "$dom" --agree-tos --no-eff-email --non-interactive || true
 done
 
 echo "Recarregando Nginx..."
