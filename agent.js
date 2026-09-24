@@ -280,16 +280,21 @@ async function handleInstall(req, res) {
 
     step('🔒 Solicitando certificados SSL Let\'s Encrypt...');
     const certEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.MAIL_FROM || ('admin@' + envVars.DOMAIN_FRONTEND);
+    try {
+      exec(`docker compose exec -T certbot sh -c "rm -rf /etc/letsencrypt/live/* /etc/letsencrypt/archive/* /etc/letsencrypt/renewal/*" 2>/dev/null || true`);
+    } catch (cleanSslErr) {
+      log(`Aviso ao limpar bootstrap SSL antes da emissão: ${cleanSslErr.message}`);
+    }
     for (const dom of domains) {
       try {
         step(`🔒 Emitindo certificado SSL para ${dom}...`);
         let issued = false;
         try {
-          exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+          exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --non-interactive`);
           issued = true;
         } catch (execErr) {
           log(`Tentando certbot via run: ${execErr.message}`);
-          exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+          exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --non-interactive`);
           issued = true;
         }
         if (issued) step(`✅ Certificado SSL emitido com sucesso para ${dom}!`);
@@ -547,14 +552,20 @@ async function handleSsl(req, res) {
     log(`Aviso subindo nginx/certbot: ${upErr.message}`);
   }
 
+  try {
+    exec(`docker compose exec -T certbot sh -c "rm -rf /etc/letsencrypt/live/* /etc/letsencrypt/archive/* /etc/letsencrypt/renewal/*" 2>/dev/null || true`);
+  } catch (cleanSslErr) {
+    log(`Aviso ao limpar bootstrap SSL antes da emissão: ${cleanSslErr.message}`);
+  }
+
   for (const dom of domains) {
     try {
       let issued = false;
       try {
-        exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+        exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --non-interactive`);
         issued = true;
       } catch (e1) {
-        exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+        exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --non-interactive`);
         issued = true;
       }
       if (issued) log(`✅ Certificado SSL emitido com sucesso para ${dom}`);
@@ -659,14 +670,20 @@ async function handleCleanDb(req, res) {
 
     log('🔒 Emitindo certificados SSL oficiais Let\'s Encrypt...');
     const certEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.MAIL_FROM || ('admin@' + (envVars.DOMAIN_FRONTEND || 'botconnecta.com.br'));
+    try {
+      exec(`docker compose exec -T certbot sh -c "rm -rf /etc/letsencrypt/live/* /etc/letsencrypt/archive/* /etc/letsencrypt/renewal/*" 2>/dev/null || true`);
+    } catch (cleanSslErr) {
+      log(`Aviso ao limpar bootstrap SSL antes da emissão: ${cleanSslErr.message}`);
+    }
+
     for (const dom of domains) {
       try {
         let issued = false;
         try {
-          exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+          exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --non-interactive`);
           issued = true;
         } catch (e1) {
-          exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+          exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --non-interactive`);
           issued = true;
         }
         if (issued) log(`✅ Certificado SSL emitido com sucesso para ${dom}`);

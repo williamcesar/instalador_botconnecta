@@ -15,6 +15,7 @@ services:
     environment:
       - REACT_APP_BACKEND_URL=${BACKEND_URL}
       - REACT_APP_HOURS_CLOSE_TICKETS_AUTO=24
+    command: sh -c "sed -i 's|http://localhost:8080|${BACKEND_URL}|g' /app/build/assets/*.js 2>/dev/null; node server.js"
     networks:
       - botconnecta
     depends_on:
@@ -31,6 +32,7 @@ services:
     container_name: bc_backend
     restart: always
     environment:
+      - PORT=8080
       - NODE_ENV=production
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -89,6 +91,7 @@ services:
     container_name: bc_api_oficial
     restart: always
     environment:
+      - PORT=6000
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME_OFICIAL}?schema=public
       - DATABASE_LINK=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME_OFICIAL}?schema=public
       - REDIS_URI=redis://:${REDIS_PASSWORD}@redis:6379
