@@ -406,6 +406,7 @@ async function handleRestart(req, res) {
     if (service) {
       exec(`docker compose restart ${service}`);
     } else {
+      exec(`docker compose up -d`);
       exec(`docker compose restart`);
     }
     return jsonResponse(res, 200, { ok: true, message: `Reiniciado: ${service || 'todos'}` });
@@ -425,7 +426,7 @@ async function handleStop(req, res) {
 
 async function handleStart(req, res) {
   try {
-    exec(`docker compose start`);
+    exec(`docker compose up -d`);
     return jsonResponse(res, 200, { ok: true, message: 'Containers iniciados' });
   } catch (err) {
     return jsonResponse(res, 500, { ok: false, error: err.message });
@@ -530,6 +531,22 @@ async function handleSsl(req, res) {
   const certEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.MAIL_FROM || ('admin@' + (envVars.DOMAIN_FRONTEND || 'botconnecta.com.br'));
 
   log(`🔒 Iniciando emissão de certificados SSL para: ${domains.join(', ')}`);
+
+  // Garante bootstrap se algum não existir para o Nginx poder subir
+  for (const dom of domains) {
+    try {
+      exec(`docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
+    } catch (bootstrapErr) {
+      log(`Aviso bootstrap SSL ${dom}: ${bootstrapErr.message}`);
+    }
+  }
+
+  try {
+    exec(`docker compose up -d nginx certbot`);
+  } catch (upErr) {
+    log(`Aviso subindo nginx/certbot: ${upErr.message}`);
+  }
+
   for (const dom of domains) {
     try {
       let issued = false;
@@ -559,7 +576,12 @@ async function handleCleanDb(req, res) {
   const envPath = path.join(INSTALL_DIR, '.env');
   let envVars = {};
   if (fs.existsSync(envPath)) {
-    const raw = fs.readFileSync(envPath, 'utf8');
+    let raw = fs.readFileSync(envPath, 'utf8');
+    if (raw.includes('+') || raw.includes('/')) {
+      raw = raw.replace(/\+/g, 'X').replace(/\//g, 'Y');
+      fs.writeFileSync(envPath, raw, 'utf8');
+      log('✓ Caracteres especiais na senha do .env sanitizados');
+    }
     raw.split('\n').forEach(line => {
       const idx = line.indexOf('=');
       if (idx > 0) envVars[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
@@ -572,6 +594,9 @@ async function handleCleanDb(req, res) {
     exec(`docker compose up -d postgres redis`);
 
     const pgUser = envVars.POSTGRES_USER || 'botconnecta';
+    const pgPass = envVars.POSTGRES_PASSWORD;
+    const dbOficial = envVars.DB_NAME_OFICIAL || 'botconnecta_oficial';
+
     for (let i = 0; i < 30; i++) {
       try {
         exec(`docker compose exec -T postgres pg_isready -U ${pgUser}`);
@@ -579,6 +604,19 @@ async function handleCleanDb(req, res) {
       } catch {
         execSync('sleep 2');
       }
+    }
+
+    if (pgPass) {
+      try {
+        exec(`docker compose exec -T postgres psql -U ${pgUser} -d template1 -c "ALTER USER \\"${pgUser}\\" WITH PASSWORD '${pgPass}';"`);
+      } catch (pwErr) {
+        log(`Aviso ao sincronizar senha do postgres: ${pwErr.message}`);
+      }
+    }
+    try {
+      exec(`docker compose exec -T postgres psql -U ${pgUser} -d template1 -tc "SELECT 1 FROM pg_database WHERE datname = '${dbOficial}'" | grep -q 1 || docker compose exec -T postgres psql -U ${pgUser} -d template1 -c "CREATE DATABASE \\"${dbOficial}\\" OWNER \\"${pgUser}\\";"`);
+    } catch (dbErr) {
+      log(`Aviso ao criar banco oficial: ${dbErr.message}`);
     }
 
     log('🔄 Executando migrations do backend...');
@@ -591,7 +629,7 @@ async function handleCleanDb(req, res) {
       log(`Aviso seed: ${seedErr.message}`);
     }
 
-    const adminEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.ADMIN_EMAIL;
+    const adminEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.ADMIN_EMAIL || 'admin@williamalmeida.com.br';
     const adminPass = envVars.API_OFICIAL_ADMIN_PASSWORD || envVars.ADMIN_PASSWORD;
     if (adminEmail && adminPass) {
       log(`👤 Configurando usuário administrador (${adminEmail})...`);
@@ -605,9 +643,45 @@ async function handleCleanDb(req, res) {
     log('🔄 Executando migrations da API Oficial...');
     exec(`docker compose run --rm api_oficial npx prisma migrate deploy`);
 
+    log('🔒 Gerando certificados bootstrap para Nginx...');
+    const domains = [envVars.DOMAIN_FRONTEND, envVars.DOMAIN_BACKEND, envVars.DOMAIN_API_OFICIAL].filter(Boolean);
+    for (const dom of domains) {
+      try {
+        exec(`docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
+      } catch (sslErr) {
+        log(`Aviso bootstrap SSL ${dom}: ${sslErr.message}`);
+      }
+    }
+
     log('🚀 Subindo todos os containers...');
     exec(`docker compose up -d`);
-    log('✅ Instalação limpa concluída com sucesso!');
+    execSync('sleep 5');
+
+    log('🔒 Emitindo certificados SSL oficiais Let\'s Encrypt...');
+    const certEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.MAIL_FROM || ('admin@' + (envVars.DOMAIN_FRONTEND || 'botconnecta.com.br'));
+    for (const dom of domains) {
+      try {
+        let issued = false;
+        try {
+          exec(`docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+          issued = true;
+        } catch (e1) {
+          exec(`docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email ${certEmail} -d ${dom} --agree-tos --no-eff-email --force-renewal --non-interactive`);
+          issued = true;
+        }
+        if (issued) log(`✅ Certificado SSL emitido com sucesso para ${dom}`);
+      } catch (err) {
+        log(`❌ Erro ao emitir SSL para ${dom}: ${err.message}`);
+      }
+    }
+
+    try {
+      exec(`docker compose exec -T nginx nginx -s reload`);
+    } catch {
+      try { exec(`docker compose restart nginx`); } catch (e) {}
+    }
+
+    log('✅ Instalação limpa e SSL concluídos com sucesso!');
   } catch (err) {
     log(`❌ Erro no reset do banco: ${err.message}`);
   }
