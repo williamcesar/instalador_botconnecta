@@ -184,6 +184,12 @@ async function handleInstall(req, res) {
     exec(`chmod +x docker/postgres/init-multiple-dbs.sh`);
 
     step('📝 Criando arquivo .env...');
+    if (envVars.POSTGRES_PASSWORD) {
+      envVars.POSTGRES_PASSWORD = envVars.POSTGRES_PASSWORD.replace(/[^a-zA-Z0-9_-]/g, 'X');
+    }
+    if (envVars.REDIS_PASSWORD) {
+      envVars.REDIS_PASSWORD = envVars.REDIS_PASSWORD.replace(/[^a-zA-Z0-9_-]/g, 'X');
+    }
     const envContent = Object.entries(envVars)
       .map(([k, v]) => `${k}=${v}`)
       .join('\n');
