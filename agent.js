@@ -380,13 +380,21 @@ async function handleUpdate(req, res) {
     exec(`sed -i "s|^VERSION=.*|VERSION=${version}|" .env`);
     exec(`docker compose pull`);
 
-    step('📄 Atualizando configuração do Nginx (resolver DNS dinâmico)...');
+    step('📄 Atualizando docker-compose.yml e configuração do Nginx...');
     const releasesUrlForNginx = body.releasesUrl || RELEASES_URL;
     fs.mkdirSync(path.join(INSTALL_DIR, 'docker/nginx/templates'), { recursive: true });
+    try {
+      // Baixa o docker-compose.yml atualizado (com IPs estáticos, healthchecks, etc.)
+      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker-compose.yml" -o docker-compose.yml`);
+      step('✅ docker-compose.yml atualizado');
+    } catch (dcErr) {
+      step(`⚠️ Aviso: não foi possível atualizar docker-compose.yml: ${dcErr.message}`);
+    }
     try {
       exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/nginx.conf" -o docker/nginx/nginx.conf`);
       exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
       exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/options-ssl-nginx.conf" -o docker/nginx/options-ssl-nginx.conf`);
+      step('✅ Templates do Nginx atualizados (resolver DNS dinâmico)');
     } catch (nginxErr) {
       step(`⚠️ Aviso: não foi possível atualizar config do Nginx: ${nginxErr.message}`);
     }
