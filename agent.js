@@ -380,9 +380,25 @@ async function handleUpdate(req, res) {
     exec(`sed -i "s|^VERSION=.*|VERSION=${version}|" .env`);
     exec(`docker compose pull`);
 
+    step('📄 Atualizando configuração do Nginx (resolver DNS dinâmico)...');
+    const releasesUrlForNginx = body.releasesUrl || RELEASES_URL;
+    fs.mkdirSync(path.join(INSTALL_DIR, 'docker/nginx/templates'), { recursive: true });
+    try {
+      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/nginx.conf" -o docker/nginx/nginx.conf`);
+      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
+      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/options-ssl-nginx.conf" -o docker/nginx/options-ssl-nginx.conf`);
+    } catch (nginxErr) {
+      step(`⚠️ Aviso: não foi possível atualizar config do Nginx: ${nginxErr.message}`);
+    }
+
     step('🚀 Atualizando containers...');
     exec(`docker compose up -d --remove-orphans`);
-    try { exec(`docker compose restart nginx`); } catch (_) {}
+    // Espera o nginx subir antes de recarregar
+    execSync('sleep 8');
+    // Recarrega configuração do nginx sem derrubar conexões abertas
+    try { exec(`docker compose exec -T nginx nginx -s reload`); } catch (_) {
+      try { exec(`docker compose restart nginx`); } catch (__) {}
+    }
 
     step('⏳ Aguardando banco de dados...');
     for (let i = 0; i < 20; i++) {
