@@ -28,6 +28,8 @@ AGENT_DIR=/opt/botconnecta-agent
 AGENT_USER=botconnecta
 RELEASES_URL=""
 AGENT_TOKEN=""
+GHCR_USER=""
+GHCR_TOKEN=""
 
 # ── Parse de argumentos ───────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -36,6 +38,8 @@ while [[ $# -gt 0 ]]; do
     --port)        AGENT_PORT="$2";     shift 2 ;;
     --releases)    RELEASES_URL="$2";   shift 2 ;;
     --install-dir) INSTALL_DIR="$2";    shift 2 ;;
+    --ghcr-user)   GHCR_USER="$2";      shift 2 ;;
+    --ghcr-token)  GHCR_TOKEN="$2";     shift 2 ;;
     *) shift ;;
   esac
 done
@@ -146,9 +150,16 @@ AGENT_PORT=${AGENT_PORT}
 INSTALL_DIR=${INSTALL_DIR}
 BACKUP_DIR=${BACKUP_DIR}
 RELEASES_URL=${RELEASES_URL}
+GHCR_USER=${GHCR_USER}
+GHCR_TOKEN=${GHCR_TOKEN}
 EOF
   chmod 600 "$AGENT_DIR/.env"
   chown "$AGENT_USER:$AGENT_USER" "$AGENT_DIR/.env"
+
+  if [[ -n "$GHCR_TOKEN" && -n "$GHCR_USER" ]]; then
+    step "Autenticando Docker no GitHub Container Registry (ghcr.io)..."
+    echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || warn "Aviso: Não foi possível autenticar no ghcr.io agora. Poderá ser feito depois."
+  fi
 
   ok "Arquivos do agente configurados em $AGENT_DIR"
 }

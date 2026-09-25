@@ -21,6 +21,8 @@ const AGENT_TOKEN = process.env.AGENT_TOKEN;
 const INSTALL_DIR = process.env.INSTALL_DIR || '/opt/botconnecta';
 const BACKUP_DIR = process.env.BACKUP_DIR || '/opt/botconnecta-backups';
 const RELEASES_URL = process.env.RELEASES_URL || 'https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main';
+const GHCR_USER = process.env.GHCR_USER || '';
+const GHCR_TOKEN = process.env.GHCR_TOKEN || '';
 const VERSION_FILE = path.join(INSTALL_DIR, '.version');
 
 if (!AGENT_TOKEN) {
@@ -32,6 +34,19 @@ if (!AGENT_TOKEN) {
 function log(msg) {
   const ts = new Date().toISOString();
   console.log(`[${ts}] ${msg}`);
+}
+
+function ensureDockerAuth(customUser, customToken) {
+  const u = (customUser || GHCR_USER || '').trim();
+  const t = (customToken || GHCR_TOKEN || '').trim();
+  if (u && t) {
+    try {
+      execSync(`echo "${t}" | docker login ghcr.io -u "${u}" --password-stdin`, { stdio: 'pipe' });
+      log('[DOCKER] Autenticado com sucesso no ghcr.io');
+    } catch (authErr) {
+      log(`[DOCKER] Aviso na autenticação ghcr.io: ${authErr.message}`);
+    }
+  }
 }
 
 function exec(cmd, opts = {}) {
@@ -197,7 +212,8 @@ async function handleInstall(req, res) {
     exec(`echo 'DOCKERHUB_USER=${dockerhubUser}' >> .env`);
     exec(`echo 'VERSION=${version}' >> .env`);
 
-    step('🐳 Baixando imagens Docker do Docker Hub...');
+    step('🐳 Baixando imagens Docker...');
+    ensureDockerAuth(body.ghcrUser, body.ghcrToken);
     exec(`docker compose pull`);
 
     step('🔒 Inicializando certificados de segurança e SSL bootstrap...');
@@ -353,6 +369,7 @@ async function handleUpdate(req, res) {
     step(`✅ Backup salvo em ${backupPath}`);
 
     step('🐳 Baixando novas imagens Docker...');
+    ensureDockerAuth(body.ghcrUser, body.ghcrToken);
     exec(`sed -i "s/VERSION=.*/VERSION=${version}/" .env`);
     exec(`docker compose pull`);
 
