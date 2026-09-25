@@ -393,9 +393,31 @@ async function handleUpdate(req, res) {
 
     step('🚀 Atualizando containers...');
     exec(`docker compose up -d --remove-orphans`);
-    // Espera o nginx subir antes de recarregar
-    execSync('sleep 8');
-    // Recarrega configuração do nginx sem derrubar conexões abertas
+
+    // Aguarda backend e frontend estarem RUNNING antes de recarregar nginx
+    // Isso evita que o nginx resolva IPs errados durante a inicialização dos containers
+    step('⏳ Aguardando backend e frontend iniciarem (máx 60s)...');
+    let containersReady = false;
+    for (let i = 0; i < 20; i++) {
+      execSync('sleep 3');
+      try {
+        const backendState = exec(`docker compose ps --format json backend`).trim().split('\n')[0];
+        const frontendState = exec(`docker compose ps --format json frontend`).trim().split('\n')[0];
+        const bState = JSON.parse(backendState || '{}');
+        const fState = JSON.parse(frontendState || '{}');
+        const bRunning = (bState.State || bState.state || '').toLowerCase() === 'running';
+        const fRunning = (fState.State || fState.state || '').toLowerCase() === 'running';
+        if (bRunning && fRunning) {
+          containersReady = true;
+          step(`✅ Backend e frontend estão RUNNING (tentativa ${i + 1})`);
+          break;
+        }
+      } catch (_) { /* continua aguardando */ }
+    }
+    if (!containersReady) step('⚠️ Timeout aguardando containers — prosseguindo mesmo assim');
+
+    // Recarrega nginx DEPOIS que os containers estão estáveis
+    // (evita o problema de resolução de IPs errados)
     try { exec(`docker compose exec -T nginx nginx -s reload`); } catch (_) {
       try { exec(`docker compose restart nginx`); } catch (__) {}
     }
