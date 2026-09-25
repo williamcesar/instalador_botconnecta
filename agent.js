@@ -748,6 +748,73 @@ async function handleCleanDb(req, res) {
   }
 }
 
+// ── Fix Nginx (aplica config com resolver DNS dinâmico) ─────────────────────
+async function handleFixNginx(req, res) {
+  const steps = [];
+  const step = (msg) => { log(msg); steps.push(msg); };
+
+  try {
+    step('📄 Baixando nginx.conf atualizado do repositório...');
+    fs.mkdirSync(path.join(INSTALL_DIR, 'docker/nginx/templates'), { recursive: true });
+    // Usa a versão instalada atual, ou 1.2.0 como fallback
+    const installedVersion = getCurrentVersion() || '1.2.0';
+    const nginxBase = `${RELEASES_URL}/releases/${installedVersion}/docker/nginx`;
+    exec(`curl -fsSL "${nginxBase}/nginx.conf" -o docker/nginx/nginx.conf`);
+    exec(`curl -fsSL "${nginxBase}/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
+    step('✅ Templates baixados com sucesso');
+
+    step('🔄 Forçando recriação do container nginx (para aplicar novo template com resolver DNS)...');
+    exec(`docker compose up -d --force-recreate --no-deps nginx`);
+    execSync('sleep 8');
+
+    step('✅ Nginx reiniciado com resolver DNS dinâmico — 502 resolvido!');
+    return jsonResponse(res, 200, { ok: true, steps });
+  } catch (err) {
+    step(`❌ Erro: ${err.message}`);
+    // Fallback: tenta só restart simples
+    try {
+      exec(`docker compose restart nginx`);
+      step('⚠️ Fallback: nginx reiniciado via restart');
+    } catch (_) {}
+    return jsonResponse(res, 500, { ok: false, error: err.message, steps });
+  }
+}
+
+// ── Self-Update (atualiza agent.js a partir do GitHub) ────────────────────────
+async function handleSelfUpdate(req, res) {
+  const steps = [];
+  const step = (msg) => { log(msg); steps.push(msg); };
+
+  try {
+    step('⬇️  Baixando nova versão do agent.js...');
+    const agentPath = process.argv[1] || '/opt/botconnecta-agent/agent.js';
+    const agentUrl = `${RELEASES_URL}/agent/agent.js`;
+    const tmpPath = agentPath + '.new';
+
+    execSync(`curl -fsSL "${agentUrl}" -o "${tmpPath}"`, { stdio: 'pipe' });
+    const newContent = fs.readFileSync(tmpPath, 'utf8');
+    if (!newContent || newContent.length < 1000) {
+      fs.unlinkSync(tmpPath);
+      throw new Error('Arquivo agent.js baixado parece inválido (muito pequeno).');
+    }
+    fs.copyFileSync(tmpPath, agentPath);
+    fs.unlinkSync(tmpPath);
+    step('✅ agent.js atualizado em disco');
+
+    step('🔄 Reiniciando agent (processo se encerrará e deve ser relançado pelo systemd)...');
+    jsonResponse(res, 200, { ok: true, steps, message: 'Agent atualizado. Reiniciando...' });
+
+    // Aguarda o response ser enviado, então sai (systemd relança automaticamente)
+    setTimeout(() => {
+      log('🔁 Auto-restart após self-update...');
+      process.exit(0);
+    }, 500);
+  } catch (err) {
+    step(`❌ Erro no self-update: ${err.message}`);
+    return jsonResponse(res, 500, { ok: false, error: err.message, steps });
+  }
+}
+
 // ── Roteador HTTP ─────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -786,6 +853,8 @@ const server = http.createServer(async (req, res) => {
     if (path_ === '/api/backups' && method === 'GET') return await handleListBackups(req, res);
     if (path_ === '/api/ssl' && method === 'POST') return await handleSsl(req, res);
     if (path_ === '/api/clean-db' && method === 'POST') return await handleCleanDb(req, res);
+    if (path_ === '/api/fix-nginx' && method === 'POST') return await handleFixNginx(req, res);
+    if (path_ === '/api/self-update' && method === 'POST') return await handleSelfUpdate(req, res);
 
     const logsMatch = path_.match(/^\/api\/logs\/?(.*)$/);
     if (logsMatch && method === 'GET') return await handleLogs(req, res, logsMatch[1]);
