@@ -370,7 +370,14 @@ async function handleUpdate(req, res) {
 
     step('🐳 Baixando novas imagens Docker...');
     ensureDockerAuth(body.ghcrUser, body.ghcrToken);
-    exec(`sed -i "s/VERSION=.*/VERSION=${version}/" .env`);
+    if (dockerhubUser) {
+      if (exec(`grep -q "^DOCKERHUB_USER=" .env && echo "yes" || echo "no"`) === 'yes') {
+        exec(`sed -i "s|^DOCKERHUB_USER=.*|DOCKERHUB_USER=${dockerhubUser}|" .env`);
+      } else {
+        exec(`echo 'DOCKERHUB_USER=${dockerhubUser}' >> .env`);
+      }
+    }
+    exec(`sed -i "s|^VERSION=.*|VERSION=${version}|" .env`);
     exec(`docker compose pull`);
 
     step('🚀 Atualizando containers...');
@@ -402,8 +409,11 @@ async function handleUpdate(req, res) {
     step('⚠️ Iniciando rollback automático...');
 
     try {
-      exec(`sed -i "s/VERSION=.*/VERSION=${previousVersion}/" .env`);
-      exec(`docker compose pull`);
+      if (fs.existsSync(path.join(backupPath, '.env.bak'))) {
+        fs.copyFileSync(path.join(backupPath, '.env.bak'), path.join(INSTALL_DIR, '.env'));
+      } else {
+        exec(`sed -i "s|^VERSION=.*|VERSION=${previousVersion}|" .env`);
+      }
       exec(`docker compose up -d --remove-orphans`);
 
       if (fs.existsSync(path.join(backupPath, 'db-full.sql'))) {
