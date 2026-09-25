@@ -17,7 +17,8 @@ services:
       - REACT_APP_HOURS_CLOSE_TICKETS_AUTO=24
     command: sh -c "sed -i 's|http://localhost:8080|${BACKEND_URL}|g' /app/build/assets/*.js 2>/dev/null; node server.js"
     networks:
-      - botconnecta
+      botconnecta:
+        ipv4_address: 172.28.1.10
     depends_on:
       - backend
     healthcheck:
@@ -72,7 +73,8 @@ services:
     ports:
       - "8080"
     networks:
-      - botconnecta
+      botconnecta:
+        ipv4_address: 172.28.1.20
     depends_on:
       postgres:
         condition: service_healthy
@@ -112,7 +114,8 @@ services:
     ports:
       - "6000"
     networks:
-      - botconnecta
+      botconnecta:
+        ipv4_address: 172.28.1.30
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,7 +139,8 @@ services:
     ports:
       - "5000"
     networks:
-      - botconnecta
+      botconnecta:
+        ipv4_address: 172.28.1.40
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
       interval: 60s
@@ -157,7 +161,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
     networks:
-      - botconnecta
+      botconnecta:
+        ipv4_address: 172.28.1.50
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${DB_NAME}"]
       interval: 10s
@@ -174,7 +179,8 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - botconnecta
+      botconnecta:
+        ipv4_address: 172.28.1.60
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -202,7 +208,8 @@ services:
       - DOMAIN_BACKEND=${DOMAIN_BACKEND}
       - DOMAIN_API_OFICIAL=${DOMAIN_API_OFICIAL}
     networks:
-      - botconnecta
+      botconnecta:
+        ipv4_address: 172.28.1.70
     depends_on:
       - frontend
       - backend
@@ -217,7 +224,8 @@ services:
       - certbot_conf:/etc/letsencrypt
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
     networks:
-      - botconnecta
+      botconnecta:
+        ipv4_address: 172.28.1.80
 
 # ── Volumes ──────────────────────────────────────────────────────────────────
 volumes:
@@ -241,3 +249,4 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
