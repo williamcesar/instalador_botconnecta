@@ -382,6 +382,7 @@ async function handleUpdate(req, res) {
 
     step('🚀 Atualizando containers...');
     exec(`docker compose up -d --remove-orphans`);
+    try { exec(`docker compose restart nginx`); } catch (_) {}
 
     step('⏳ Aguardando banco de dados...');
     for (let i = 0; i < 20; i++) {
