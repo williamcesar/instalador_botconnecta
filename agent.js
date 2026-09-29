@@ -384,19 +384,19 @@ async function handleUpdate(req, res) {
     const releasesUrlForNginx = body.releasesUrl || RELEASES_URL;
     fs.mkdirSync(path.join(INSTALL_DIR, 'docker/nginx/templates'), { recursive: true });
     try {
-      // Baixa o docker-compose.yml atualizado (com IPs estáticos, healthchecks, etc.)
-      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker-compose.yml" -o docker-compose.yml`);
+      // Baixa o docker-compose.yml atualizado de forma segura usando arquivo temporário
+      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker-compose.yml" -o docker-compose.yml.tmp && mv docker-compose.yml.tmp docker-compose.yml`);
       step('✅ docker-compose.yml atualizado');
     } catch (dcErr) {
-      step(`⚠️ Aviso: não foi possível atualizar docker-compose.yml: ${dcErr.message}`);
+      step(`⚠️ Usando docker-compose.yml atual (release específica não encontrada: ${dcErr.message})`);
     }
     try {
-      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/nginx.conf" -o docker/nginx/nginx.conf`);
-      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
-      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/options-ssl-nginx.conf" -o docker/nginx/options-ssl-nginx.conf`);
+      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/nginx.conf" -o docker/nginx/nginx.conf.tmp && mv docker/nginx/nginx.conf.tmp docker/nginx/nginx.conf`);
+      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/templates/default.conf.template" -o docker/nginx/templates/default.conf.template.tmp && mv docker/nginx/templates/default.conf.template.tmp docker/nginx/templates/default.conf.template`);
+      exec(`curl -fsSL "${releasesUrlForNginx}/releases/${version}/docker/nginx/options-ssl-nginx.conf" -o docker/nginx/options-ssl-nginx.conf.tmp && mv docker/nginx/options-ssl-nginx.conf.tmp docker/nginx/options-ssl-nginx.conf`);
       step('✅ Templates do Nginx atualizados (resolver DNS dinâmico)');
     } catch (nginxErr) {
-      step(`⚠️ Aviso: não foi possível atualizar config do Nginx: ${nginxErr.message}`);
+      step(`⚠️ Usando templates do Nginx atuais (${nginxErr.message})`);
     }
 
     step('🚀 Atualizando containers...');
