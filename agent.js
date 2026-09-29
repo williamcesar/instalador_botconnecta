@@ -424,10 +424,17 @@ async function handleUpdate(req, res) {
     }
     if (!containersReady) step('⚠️ Timeout aguardando containers — prosseguindo mesmo assim');
 
-    // Recarrega nginx DEPOIS que os containers estão estáveis
-    // (evita o problema de resolução de IPs errados)
-    try { exec(`docker compose exec -T nginx nginx -s reload`); } catch (_) {
-      try { exec(`docker compose restart nginx`); } catch (__) {}
+    // Força recriação do Nginx DEPOIS que os containers estão estáveis.
+    // --force-recreate garante que o Nginx re-resolve os IPs dos novos containers via DNS interno do Docker.
+    // Apenas `nginx -s reload` NÃO é suficiente pois mantém os IPs antigos em cache → 502 Bad Gateway.
+    step('🔄 Recriando Nginx para resolver novos IPs dos containers...');
+    try {
+      exec(`docker compose up -d --force-recreate --no-deps nginx`);
+      execSync('sleep 5');
+      step('✅ Nginx recriado com sucesso — DNS re-resolvido');
+    } catch (nginxErr) {
+      step(`⚠️ Falha ao recriar Nginx (${nginxErr.message}), tentando restart...`);
+      try { exec(`docker compose restart nginx`); } catch (_) {}
     }
 
     step('⏳ Aguardando banco de dados...');
@@ -462,6 +469,12 @@ async function handleUpdate(req, res) {
         exec(`sed -i "s|^VERSION=.*|VERSION=${previousVersion}|" .env`);
       }
       exec(`docker compose up -d --remove-orphans`);
+      try {
+        execSync('sleep 10');
+        exec(`docker compose up -d --force-recreate --no-deps nginx`);
+      } catch (_) {
+        try { exec(`docker compose restart nginx`); } catch (__) {}
+      }
 
       if (fs.existsSync(path.join(backupPath, 'db-full.sql'))) {
         exec(`docker compose exec -T postgres psql -U botconnecta -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='botconnecta' AND pid <> pg_backend_pid();"`);
