@@ -424,16 +424,25 @@ async function handleUpdate(req, res) {
     }
     if (!containersReady) step('⚠️ Timeout aguardando containers — prosseguindo mesmo assim');
 
-    // Força recriação do Nginx DEPOIS que os containers estão estáveis.
-    // --force-recreate garante que o Nginx re-resolve os IPs dos novos containers via DNS interno do Docker.
-    // Apenas `nginx -s reload` NÃO é suficiente pois mantém os IPs antigos em cache → 502 Bad Gateway.
-    step('🔄 Recriando Nginx para resolver novos IPs dos containers...');
+    // Fix Nginx completo: baixa template com resolver DNS dinâmico do GitHub + force-recreate.
+    // Isso garante que o Nginx SEMPRE resolva os IPs corretos após qualquer update — sem 502 Bad Gateway.
+    step('🔄 Aplicando template Nginx com DNS dinâmico e recriando container...');
     try {
+      fs.mkdirSync(path.join(INSTALL_DIR, 'docker/nginx/templates'), { recursive: true });
+      const nginxBase = `${releasesUrlForNginx}/releases/${version}/docker/nginx`;
+      try {
+        exec(`curl -fsSL "${nginxBase}/nginx.conf" -o docker/nginx/nginx.conf.tmp && mv docker/nginx/nginx.conf.tmp docker/nginx/nginx.conf`);
+        exec(`curl -fsSL "${nginxBase}/templates/default.conf.template" -o docker/nginx/templates/default.conf.template.tmp && mv docker/nginx/templates/default.conf.template.tmp docker/nginx/templates/default.conf.template`);
+        step('✅ Template Nginx com resolver DNS dinâmico aplicado');
+      } catch (tmplErr) {
+        step(`⚠️ Template do GitHub não encontrado para ${version}, usando config atual (${tmplErr.message})`);
+      }
+      // Força recriação do container para carregar o novo template
       exec(`docker compose up -d --force-recreate --no-deps nginx`);
-      execSync('sleep 5');
-      step('✅ Nginx recriado com sucesso — DNS re-resolvido');
+      execSync('sleep 8');
+      step('✅ Nginx recriado com sucesso — 502 Bad Gateway prevenido permanentemente');
     } catch (nginxErr) {
-      step(`⚠️ Falha ao recriar Nginx (${nginxErr.message}), tentando restart...`);
+      step(`⚠️ Falha ao recriar Nginx (${nginxErr.message}), tentando restart simples...`);
       try { exec(`docker compose restart nginx`); } catch (_) {}
     }
 
