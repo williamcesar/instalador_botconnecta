@@ -161,6 +161,10 @@ EOF
     echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin || warn "Aviso: Não foi possível autenticar no ghcr.io agora. Poderá ser feito depois."
   fi
 
+  # Garante permissões completas para o usuário do agente em todos os arquivos baixados
+  chown -R "$AGENT_USER:$AGENT_USER" "$AGENT_DIR"
+  chmod 600 "$AGENT_DIR/.env"
+
   ok "Arquivos do agente configurados em $AGENT_DIR"
 }
 
@@ -180,7 +184,7 @@ WorkingDirectory=${AGENT_DIR}
 EnvironmentFile=${AGENT_DIR}/.env
 ExecStart=/usr/bin/node ${AGENT_DIR}/agent.js
 Restart=always
-RestartSec=10
+RestartSec=2
 StandardOutput=syslog
 StandardError=syslog
 SyslogIdentifier=botconnecta-agent

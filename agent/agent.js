@@ -1005,8 +1005,28 @@ async function handleSelfUpdate(req, res) {
       try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
       throw new Error(`Falha ao baixar agent.js atualizado do GitHub: ${lastErr ? lastErr.message : 'inválido'}`);
     }
-    fs.copyFileSync(tmpPath, agentPath);
-    fs.unlinkSync(tmpPath);
+    // Substituição resiliente a permissões (unlink prévio permite substituir arquivo criado por root se a pasta for do botconnecta)
+    let replaced = false;
+    try {
+      try { fs.unlinkSync(agentPath); } catch (_) {}
+      fs.renameSync(tmpPath, agentPath);
+      replaced = true;
+    } catch (_) {
+      try {
+        fs.copyFileSync(tmpPath, agentPath);
+        try { fs.unlinkSync(tmpPath); } catch (_) {}
+        replaced = true;
+      } catch (copyErr) {
+        try {
+          execSync(`mv -f "${tmpPath}" "${agentPath}"`);
+          replaced = true;
+        } catch (mvErr) {
+          try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
+          throw new Error(`Falha ao substituir ${agentPath} (permissão negada?): ${mvErr.message}`);
+        }
+      }
+    }
+    try { fs.chmodSync(agentPath, 0o755); } catch (_) {}
     step('✅ agent.js atualizado em disco');
 
     step('🔄 Reiniciando agent (processo se encerrará e deve ser relançado pelo systemd)...');
@@ -1016,7 +1036,7 @@ async function handleSelfUpdate(req, res) {
     setTimeout(() => {
       log('🔁 Auto-restart após self-update...');
       process.exit(0);
-    }, 500);
+    }, 600);
   } catch (err) {
     step(`❌ Erro no self-update: ${err.message}`);
     return jsonResponse(res, 500, { ok: false, error: err.message, steps });
