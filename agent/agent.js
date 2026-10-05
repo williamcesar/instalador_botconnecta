@@ -302,11 +302,16 @@ async function handleInstall(req, res) {
     }
 
     step('🔄 Executando migrations do backend...');
-    exec(`docker compose run --rm backend npm run db:migrate`);
+    try {
+      exec(`docker compose run --rm --no-deps backend npm run db:migrate`);
+    } catch (migErr) {
+      log(`Aviso run --no-deps backend migrate: ${migErr.message}`);
+      exec(`docker compose run --rm backend npm run db:migrate`);
+    }
 
     step('🌱 Executando seeds iniciais do backend (empresa e configurações)...');
     try {
-      exec(`docker compose run --rm backend npm run db:seed`);
+      exec(`docker compose run --rm --no-deps backend npm run db:seed`);
     } catch (seedErr) {
       log(`Aviso seed: ${seedErr.message}`);
     }
@@ -516,9 +521,24 @@ async function handleUpdate(req, res) {
       }
     }
 
-    step('🔄 Executando migrations...');
-    exec(`docker compose exec -T backend npm run db:migrate`);
-    exec(`docker compose exec -T api_oficial npx prisma migrate deploy`);
+    step('🔄 Executando migrations do backend...');
+    try {
+      exec(`docker compose run --rm --no-deps backend npm run db:migrate`);
+    } catch (migErr) {
+      log(`Aviso run migrate: ${migErr.message}`);
+      try { exec(`docker compose exec -T backend npm run db:migrate`); } catch (_) {}
+    }
+
+    try {
+      exec(`docker compose run --rm --no-deps backend npm run db:seed`);
+    } catch (_) {}
+
+    step('🔄 Executando migrations da API Oficial...');
+    try {
+      exec(`docker compose run --rm --no-deps api_oficial npx prisma migrate deploy`);
+    } catch (migOfErr) {
+      try { exec(`docker compose exec -T api_oficial npx prisma migrate deploy`); } catch (_) {}
+    }
 
     step('🏥 Verificando saúde dos serviços...');
     execSync('sleep 15');
@@ -873,22 +893,31 @@ async function handleMigrate(req, res) {
 
   try {
     log('🔄 Executando migrations do backend...');
-    exec(`docker compose run --rm backend npm run db:migrate`);
+    try {
+      exec(`docker compose run --rm --no-deps backend npm run db:migrate`);
+    } catch (migErr) {
+      log(`Aviso run --no-deps backend migrate: ${migErr.message}`);
+      exec(`docker compose run --rm backend npm run db:migrate`);
+    }
 
     log('🌱 Executando seeds iniciais...');
     try {
-      exec(`docker compose run --rm backend npm run db:seed`);
+      exec(`docker compose run --rm --no-deps backend npm run db:seed`);
     } catch (seedErr) {
       log(`Aviso seed: ${seedErr.message}`);
     }
 
     log('🔄 Executando migrations da API Oficial...');
     try {
-      exec(`docker compose run --rm api_oficial npx prisma migrate deploy`);
+      exec(`docker compose run --rm --no-deps api_oficial npx prisma migrate deploy`);
     } catch (_) {}
 
     log('🔄 Reiniciando backend para carregar tabelas...');
-    exec(`docker compose restart backend`);
+    try {
+      exec(`docker compose restart backend`);
+    } catch (_) {
+      exec(`docker compose up -d backend`);
+    }
     log('✅ Migrations concluídas e backend reiniciado com sucesso!');
   } catch (err) {
     log(`❌ Erro ao executar migrations: ${err.message}`);
