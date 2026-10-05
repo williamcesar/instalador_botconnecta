@@ -1,13 +1,4 @@
 # ==============================================================================
-# NGINX — BotConnecta
-# Usa o resolver interno do Docker (127.0.0.11) para sempre re-resolver os
-# IPs dos containers dinamicamente. Isso evita 502 Bad Gateway após updates.
-# ==============================================================================
-
-# Define upstream via variável para forçar resolução dinâmica de DNS
-# O resolver 127.0.0.11 é o DNS interno do Docker (sempre disponível na rede interna)
-
-# ==============================================================================
 # FRONTEND — ${DOMAIN_FRONTEND}
 # ==============================================================================
 server {
@@ -25,22 +16,16 @@ server {
 }
 
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;
     server_name ${DOMAIN_FRONTEND};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_FRONTEND}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_FRONTEND}/privkey.pem;
-    include /etc/nginx/options-ssl-nginx.conf;
-    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
-
-    # Resolver interno do Docker com TTL 0 para re-resolver sempre
-    resolver 127.0.0.11 valid=0s ipv6=off;
-    resolver_timeout 5s;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     location / {
-        set $upstream_frontend http://frontend:3000;
-        proxy_pass $upstream_frontend;
+        proxy_pass http://frontend:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -50,6 +35,18 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
         proxy_read_timeout 86400s;
+    }
+
+    # Arquivos públicos e uploads do backend acessíveis via domínio frontend
+    location /public/ {
+        proxy_pass http://backend:8080/public/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS";
     }
 }
 
@@ -70,24 +67,18 @@ server {
 }
 
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;
     server_name ${DOMAIN_BACKEND};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_BACKEND}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_BACKEND}/privkey.pem;
-    include /etc/nginx/options-ssl-nginx.conf;
-    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     client_max_body_size 100M;
 
-    # Resolver interno do Docker com TTL 0
-    resolver 127.0.0.11 valid=0s ipv6=off;
-    resolver_timeout 5s;
-
     location / {
-        set $upstream_backend http://backend:8080;
-        proxy_pass $upstream_backend;
+        proxy_pass http://backend:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
@@ -100,11 +91,16 @@ server {
         proxy_connect_timeout 75s;
     }
 
-    # Arquivos públicos do backend
+    # Arquivos públicos do backend (proxy para Express servir com CORS, streaming e permissões corretas)
     location /public/ {
-        alias /var/www/backend_public/;
-        expires 30d;
-        add_header Cache-Control "public, no-transform";
+        proxy_pass http://backend:8080/public/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS";
     }
 }
 
@@ -125,24 +121,18 @@ server {
 }
 
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;
     server_name ${DOMAIN_API_OFICIAL};
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_API_OFICIAL}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_API_OFICIAL}/privkey.pem;
-    include /etc/nginx/options-ssl-nginx.conf;
-    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     client_max_body_size 100M;
 
-    # Resolver interno do Docker com TTL 0
-    resolver 127.0.0.11 valid=0s ipv6=off;
-    resolver_timeout 5s;
-
     location / {
-        set $upstream_api_oficial http://api_oficial:6000;
-        proxy_pass $upstream_api_oficial;
+        proxy_pass http://api_oficial:6000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;

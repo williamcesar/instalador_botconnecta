@@ -69,6 +69,7 @@ services:
       - TOKEN_API_OFICIAL=${TOKEN_API_OFICIAL}
       - SOCKET_ADMIN=${SOCKET_ADMIN}
     volumes:
+      - backend_public:/app/public
       - backend_public:/home/node/app/public
     ports:
       - "8080"
