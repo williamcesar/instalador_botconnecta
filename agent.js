@@ -58,6 +58,45 @@ function exec(cmd, opts = {}) {
   }).toString().trim();
 }
 
+function downloadReleaseFile(releasesUrl, version, relPath, destPath, stepFn = null) {
+  const candidates = [
+    `${releasesUrl}/releases/${version}/${relPath}`,
+    `${releasesUrl}/releases/latest/${relPath}`,
+    `${releasesUrl}/releases/1.3.6/${relPath}`,
+    `${releasesUrl}/releases/1.2.1/${relPath}`,
+    `${releasesUrl}/releases/1.2.0/${relPath}`,
+    `${releasesUrl}/releases/1.0.0/${relPath}`
+  ];
+  let success = false;
+  let lastErr = null;
+  let usedUrl = '';
+
+  for (const url of candidates) {
+    try {
+      exec(`curl -fsSL "${url}" -o "${destPath}.tmp" && mv "${destPath}.tmp" "${destPath}"`);
+      success = true;
+      usedUrl = url;
+      break;
+    } catch (err) {
+      lastErr = err;
+      try {
+        if (fs.existsSync(path.join(INSTALL_DIR, `${destPath}.tmp`))) {
+          fs.unlinkSync(path.join(INSTALL_DIR, `${destPath}.tmp`));
+        }
+      } catch (_) {}
+    }
+  }
+
+  if (!success) {
+    throw new Error(`Falha ao baixar ${relPath} (tentadas versões: ${version}, latest, 1.3.6, 1.2.1): ${lastErr ? lastErr.message : 'desconhecido'}`);
+  }
+
+  if (stepFn && !usedUrl.includes(`/${version}/`)) {
+    stepFn(`ℹ️ Arquivo ${relPath} obtido via fallback seguro de ${usedUrl}`);
+  }
+  return true;
+}
+
 function jsonResponse(res, statusCode, data) {
   const body = JSON.stringify(data);
   res.writeHead(statusCode, {
@@ -189,13 +228,13 @@ async function handleInstall(req, res) {
     fs.mkdirSync(path.join(INSTALL_DIR, 'docker/nginx/templates'), { recursive: true });
 
     step('📦 Baixando docker-compose.yml e arquivos de configuração...');
-    // Pull do docker-compose.yml do repositório central
-    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker-compose.yml" -o docker-compose.yml`);
-    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/nginx.conf" -o docker/nginx/nginx.conf`);
-    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
-    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/options-ssl-nginx.conf" -o docker/nginx/options-ssl-nginx.conf`);
-    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/nginx/ssl-dhparams.pem" -o docker/nginx/ssl-dhparams.pem`);
-    exec(`curl -fsSL "${releasesUrl}/releases/${version}/docker/postgres/init-multiple-dbs.sh" -o docker/postgres/init-multiple-dbs.sh`);
+    // Pull do docker-compose.yml e templates com fallback resiliente
+    downloadReleaseFile(releasesUrl, version, 'docker-compose.yml', 'docker-compose.yml', step);
+    downloadReleaseFile(releasesUrl, version, 'docker/nginx/nginx.conf', 'docker/nginx/nginx.conf', step);
+    downloadReleaseFile(releasesUrl, version, 'docker/nginx/templates/default.conf.template', 'docker/nginx/templates/default.conf.template', step);
+    downloadReleaseFile(releasesUrl, version, 'docker/nginx/options-ssl-nginx.conf', 'docker/nginx/options-ssl-nginx.conf', step);
+    downloadReleaseFile(releasesUrl, version, 'docker/nginx/ssl-dhparams.pem', 'docker/nginx/ssl-dhparams.pem', step);
+    downloadReleaseFile(releasesUrl, version, 'docker/postgres/init-multiple-dbs.sh', 'docker/postgres/init-multiple-dbs.sh', step);
     exec(`chmod +x docker/postgres/init-multiple-dbs.sh`);
 
     step('📝 Criando arquivo .env...');
@@ -598,9 +637,16 @@ async function handleLogs(req, res, service) {
     }
     proc = spawn('tail', ['-n', '150', '-f', logFile]);
   } else {
-    const args = ['compose', 'logs', '--follow', '--tail=100'];
-    if (service) args.push(service);
-    proc = spawn('docker', args, { cwd: INSTALL_DIR });
+    const composeFile = path.join(INSTALL_DIR, 'docker-compose.yml');
+    const logFile = path.join(INSTALL_DIR, 'install.log');
+    if (!fs.existsSync(composeFile) && fs.existsSync(logFile)) {
+      res.write(`data: ${JSON.stringify("[Aviso: docker-compose.yml ainda não configurado na VPS. Exibindo log de instalação:]\n\n")}\n\n`);
+      proc = spawn('tail', ['-n', '150', '-f', logFile]);
+    } else {
+      const args = ['compose', 'logs', '--follow', '--tail=100'];
+      if (service) args.push(service);
+      proc = spawn('docker', args, { cwd: INSTALL_DIR });
+    }
   }
 
   proc.stdout.on('data', data => {
@@ -808,11 +854,10 @@ async function handleFixNginx(req, res) {
   try {
     step('📄 Baixando nginx.conf atualizado do repositório...');
     fs.mkdirSync(path.join(INSTALL_DIR, 'docker/nginx/templates'), { recursive: true });
-    // Usa a versão instalada atual, ou 1.2.0 como fallback
-    const installedVersion = getCurrentVersion() || '1.2.0';
-    const nginxBase = `${RELEASES_URL}/releases/${installedVersion}/docker/nginx`;
-    exec(`curl -fsSL "${nginxBase}/nginx.conf" -o docker/nginx/nginx.conf`);
-    exec(`curl -fsSL "${nginxBase}/templates/default.conf.template" -o docker/nginx/templates/default.conf.template`);
+    // Usa a versão instalada atual, ou latest / 1.2.1 como fallback
+    const installedVersion = getCurrentVersion() || 'latest';
+    downloadReleaseFile(RELEASES_URL, installedVersion, 'docker/nginx/nginx.conf', 'docker/nginx/nginx.conf', step);
+    downloadReleaseFile(RELEASES_URL, installedVersion, 'docker/nginx/templates/default.conf.template', 'docker/nginx/templates/default.conf.template', step);
     step('✅ Templates baixados com sucesso');
 
     step('🔄 Forçando recriação do container nginx (para aplicar novo template com resolver DNS)...');
@@ -840,14 +885,29 @@ async function handleSelfUpdate(req, res) {
   try {
     step('⬇️  Baixando nova versão do agent.js...');
     const agentPath = process.argv[1] || '/opt/botconnecta-agent/agent.js';
-    const agentUrl = `${RELEASES_URL}/agent/agent.js`;
+    const urls = [
+      `${RELEASES_URL}/agent.js`,
+      `${RELEASES_URL}/agent/agent.js`
+    ];
     const tmpPath = agentPath + '.new';
 
-    execSync(`curl -fsSL "${agentUrl}" -o "${tmpPath}"`, { stdio: 'pipe' });
-    const newContent = fs.readFileSync(tmpPath, 'utf8');
-    if (!newContent || newContent.length < 1000) {
-      fs.unlinkSync(tmpPath);
-      throw new Error('Arquivo agent.js baixado parece inválido (muito pequeno).');
+    let downloaded = false;
+    let lastErr = null;
+    for (const agentUrl of urls) {
+      try {
+        execSync(`curl -fsSL "${agentUrl}" -o "${tmpPath}"`, { stdio: 'pipe' });
+        const newContent = fs.readFileSync(tmpPath, 'utf8');
+        if (newContent && newContent.length >= 1000) {
+          downloaded = true;
+          break;
+        }
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!downloaded) {
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
+      throw new Error(`Falha ao baixar agent.js atualizado do GitHub: ${lastErr ? lastErr.message : 'inválido'}`);
     }
     fs.copyFileSync(tmpPath, agentPath);
     fs.unlinkSync(tmpPath);
