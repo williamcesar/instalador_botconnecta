@@ -265,8 +265,8 @@ async function handleInstall(req, res) {
       }
     }
 
-    step('🚀 Subindo containers...');
-    exec(`docker compose up -d`);
+    step('🚀 Subindo banco de dados e cache (PostgreSQL e Redis)...');
+    exec(`docker compose up -d postgres redis`);
 
     step('⏳ Aguardando banco de dados...');
     let dbReady = false;
@@ -301,20 +301,12 @@ async function handleInstall(req, res) {
       log(`Aviso ao verificar banco oficial: ${dbErr.message}`);
     }
 
-    // Reinicia backend e api_oficial para conectarem com a senha sincronizada
-    try {
-      exec(`docker compose restart backend api_oficial`);
-      execSync('sleep 5');
-    } catch (restartErr) {
-      log(`Aviso restart: ${restartErr.message}`);
-    }
-
     step('🔄 Executando migrations do backend...');
-    exec(`docker compose exec -T backend npm run db:migrate`);
+    exec(`docker compose run --rm backend npm run db:migrate`);
 
     step('🌱 Executando seeds iniciais do backend (empresa e configurações)...');
     try {
-      exec(`docker compose exec -T backend npm run db:seed`);
+      exec(`docker compose run --rm backend npm run db:seed`);
     } catch (seedErr) {
       log(`Aviso seed: ${seedErr.message}`);
     }
@@ -324,14 +316,17 @@ async function handleInstall(req, res) {
     if (adminEmail && adminPass) {
       step(`👤 Configurando usuário administrador inicial (${adminEmail})...`);
       try {
-        exec(`docker compose exec -T backend node -e "const bcrypt = require('bcryptjs'); const { Sequelize } = require('sequelize'); const s = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, { host: process.env.DB_HOST, dialect: 'postgres', logging: false }); s.query(\\\"UPDATE \\\\\\\"Users\\\\\\\" SET email='${adminEmail}', \\\\\\\"passwordHash\\\\\\\"='\\\" + bcrypt.hashSync('${adminPass}', 8) + \\\"' WHERE id=1;\\\").then(() => { console.log('Admin sincronizado'); process.exit(0); }).catch(e => { console.error(e); process.exit(1); });"`);
+        exec(`docker compose run --rm backend node -e "const bcrypt = require('bcryptjs'); const { Sequelize } = require('sequelize'); const s = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, { host: process.env.DB_HOST, dialect: 'postgres', logging: false }); s.query(\\\"UPDATE \\\\\\\"Users\\\\\\\" SET email='${adminEmail}', \\\\\\\"passwordHash\\\\\\\"='\\\" + bcrypt.hashSync('${adminPass}', 8) + \\\"' WHERE id=1;\\\").then(() => { console.log('Admin sincronizado'); process.exit(0); }).catch(e => { console.error(e); process.exit(1); });"`);
       } catch (adminErr) {
         log(`Aviso ao sincronizar admin: ${adminErr.message}`);
       }
     }
 
     step('🔄 Executando migrations da API Oficial...');
-    exec(`docker compose exec -T api_oficial npx prisma migrate deploy`);
+    exec(`docker compose run --rm api_oficial npx prisma migrate deploy`);
+
+    step('🚀 Subindo todos os containers do sistema...');
+    exec(`docker compose up -d`);
 
     step('🔒 Solicitando certificados SSL Let\'s Encrypt...');
     const certEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.MAIL_FROM || ('admin@' + envVars.DOMAIN_FRONTEND);
@@ -872,6 +867,34 @@ async function handleCleanDb(req, res) {
   }
 }
 
+// ── Executar Migrations e Seeds (Backend e API Oficial) ──────────────────────
+async function handleMigrate(req, res) {
+  jsonResponse(res, 202, { ok: true, message: 'Execução de migrations iniciada' });
+
+  try {
+    log('🔄 Executando migrations do backend...');
+    exec(`docker compose run --rm backend npm run db:migrate`);
+
+    log('🌱 Executando seeds iniciais...');
+    try {
+      exec(`docker compose run --rm backend npm run db:seed`);
+    } catch (seedErr) {
+      log(`Aviso seed: ${seedErr.message}`);
+    }
+
+    log('🔄 Executando migrations da API Oficial...');
+    try {
+      exec(`docker compose run --rm api_oficial npx prisma migrate deploy`);
+    } catch (_) {}
+
+    log('🔄 Reiniciando backend para carregar tabelas...');
+    exec(`docker compose restart backend`);
+    log('✅ Migrations concluídas e backend reiniciado com sucesso!');
+  } catch (err) {
+    log(`❌ Erro ao executar migrations: ${err.message}`);
+  }
+}
+
 // ── Fix Nginx (aplica config com resolver DNS dinâmico) ─────────────────────
 async function handleFixNginx(req, res) {
   const steps = [];
@@ -991,6 +1014,7 @@ const server = http.createServer(async (req, res) => {
     if (path_ === '/api/backups' && method === 'GET') return await handleListBackups(req, res);
     if (path_ === '/api/ssl' && method === 'POST') return await handleSsl(req, res);
     if (path_ === '/api/clean-db' && method === 'POST') return await handleCleanDb(req, res);
+    if (path_ === '/api/migrate' && method === 'POST') return await handleMigrate(req, res);
     if (path_ === '/api/fix-nginx' && method === 'POST') return await handleFixNginx(req, res);
     if (path_ === '/api/self-update' && method === 'POST') return await handleSelfUpdate(req, res);
 
