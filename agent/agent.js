@@ -909,36 +909,42 @@ async function handleCleanDb(req, res) {
 async function handleMigrate(req, res) {
   jsonResponse(res, 202, { ok: true, message: 'Execução de migrations iniciada' });
 
+  const logFile = path.join(INSTALL_DIR, 'install.log');
+  const step = (msg) => {
+    log(msg);
+    try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`); } catch (_) {}
+  };
+
   try {
-    log('🔄 Executando migrations do backend...');
+    step('🔄 Executando migrations do backend...');
     try {
       exec(`docker compose run --rm --no-deps backend npm run db:migrate`);
     } catch (migErr) {
-      log(`Aviso run --no-deps backend migrate: ${migErr.message}`);
+      step(`Aviso run --no-deps backend migrate: ${migErr.message}`);
       exec(`docker compose run --rm backend npm run db:migrate`);
     }
 
-    log('🌱 Executando seeds iniciais...');
+    step('🌱 Executando seeds iniciais...');
     try {
       exec(`docker compose run --rm --no-deps backend npm run db:seed`);
     } catch (seedErr) {
-      log(`Aviso seed: ${seedErr.message}`);
+      step(`Aviso seed: ${seedErr.message}`);
     }
 
-    log('🔄 Executando migrations da API Oficial...');
+    step('🔄 Executando migrations da API Oficial...');
     try {
       exec(`docker compose run --rm --no-deps api_oficial npx prisma migrate deploy`);
     } catch (_) {}
 
-    log('🔄 Reiniciando backend para carregar tabelas...');
+    step('🔄 Reiniciando backend para carregar tabelas...');
     try {
       exec(`docker compose restart backend`);
     } catch (_) {
       exec(`docker compose up -d backend`);
     }
-    log('✅ Migrations concluídas e backend reiniciado com sucesso!');
+    step('✅ Migrations concluídas e backend reiniciado com sucesso!');
   } catch (err) {
-    log(`❌ Erro ao executar migrations: ${err.message}`);
+    step(`❌ Erro ao executar migrations: ${err.message}`);
   }
 }
 
