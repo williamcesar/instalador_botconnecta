@@ -21,8 +21,8 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_FRONTEND}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_FRONTEND}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    include /etc/nginx/options-ssl-nginx.conf;
+    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
 
     location / {
         proxy_pass http://frontend:3000;
@@ -38,15 +38,15 @@ server {
     }
 
     # Arquivos públicos e uploads do backend acessíveis via domínio frontend
-    location /public/ {
-        proxy_pass http://backend:8080/public/;
+    location ^~ /public/ {
+        proxy_pass http://backend:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods "GET, OPTIONS";
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
     }
 }
 
@@ -72,8 +72,8 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_BACKEND}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_BACKEND}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    include /etc/nginx/options-ssl-nginx.conf;
+    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
 
     client_max_body_size 100M;
 
@@ -92,15 +92,15 @@ server {
     }
 
     # Arquivos públicos do backend (proxy para Express servir com CORS, streaming e permissões corretas)
-    location /public/ {
-        proxy_pass http://backend:8080/public/;
+    location ^~ /public/ {
+        proxy_pass http://backend:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods "GET, OPTIONS";
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
     }
 }
 
@@ -126,8 +126,8 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/${DOMAIN_API_OFICIAL}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_API_OFICIAL}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    include /etc/nginx/options-ssl-nginx.conf;
+    ssl_dhparam /etc/nginx/ssl-dhparams.pem;
 
     client_max_body_size 100M;
 
