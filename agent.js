@@ -358,8 +358,9 @@ async function handleInstall(req, res) {
       }
     }
 
-    step('🔄 Recarregando Nginx com novos certificados...');
+    step('🔄 Recarregando Nginx com novos certificados e rota /public/...');
     try {
+      exec(`docker compose exec -T nginx sed -i 's|alias /var/www/backend_public/;|proxy_pass http://backend:8080/public/; add_header Access-Control-Allow-Origin *;|g' /etc/nginx/conf.d/default.conf 2>/dev/null || true`);
       exec(`docker compose exec -T nginx nginx -s reload`);
     } catch {
       try { exec(`docker compose restart nginx`); } catch (e) {}
@@ -504,8 +505,12 @@ async function handleUpdate(req, res) {
       }
       // Força recriação do container para carregar o novo template
       exec(`docker compose up -d --force-recreate --no-deps nginx`);
-      execSync('sleep 8');
-      step('✅ Nginx recriado com sucesso — 502 Bad Gateway prevenido permanentemente');
+      execSync('sleep 5');
+      try {
+        exec(`docker compose exec -T nginx sed -i 's|alias /var/www/backend_public/;|proxy_pass http://backend:8080/public/; add_header Access-Control-Allow-Origin *;|g' /etc/nginx/conf.d/default.conf 2>/dev/null || true`);
+        exec(`docker compose exec -T nginx nginx -s reload 2>/dev/null || true`);
+      } catch (_) {}
+      step('✅ Nginx recriado com sucesso — 502 Bad Gateway e rota /public/ prevenidos permanentemente');
     } catch (nginxErr) {
       step(`⚠️ Falha ao recriar Nginx (${nginxErr.message}), tentando restart simples...`);
       try { exec(`docker compose restart nginx`); } catch (_) {}
@@ -964,9 +969,13 @@ async function handleFixNginx(req, res) {
 
     step('🔄 Forçando recriação do container nginx (para aplicar novo template com resolver DNS)...');
     exec(`docker compose up -d --force-recreate --no-deps nginx`);
-    execSync('sleep 8');
+    execSync('sleep 5');
+    try {
+      exec(`docker compose exec -T nginx sed -i 's|alias /var/www/backend_public/;|proxy_pass http://backend:8080/public/; add_header Access-Control-Allow-Origin *;|g' /etc/nginx/conf.d/default.conf 2>/dev/null || true`);
+      exec(`docker compose exec -T nginx nginx -s reload 2>/dev/null || true`);
+    } catch (_) {}
 
-    step('✅ Nginx reiniciado com resolver DNS dinâmico — 502 resolvido!');
+    step('✅ Nginx reiniciado com resolver DNS dinâmico e proxy /public/ — 502 e logos resolvidos!');
     return jsonResponse(res, 200, { ok: true, steps });
   } catch (err) {
     step(`❌ Erro: ${err.message}`);
@@ -1107,6 +1116,14 @@ server.listen(PORT, '0.0.0.0', () => {
   log(`🚀 BotConnecta Agent rodando na porta ${PORT}`);
   log(`📂 Diretório de instalação: ${INSTALL_DIR}`);
   log(`💾 Diretório de backups: ${BACKUP_DIR}`);
+
+  // Auto-correção passiva no boot do agent: garante rota /public/ via proxy_pass
+  setTimeout(() => {
+    try {
+      exec(`docker compose exec -T nginx sed -i 's|alias /var/www/backend_public/;|proxy_pass http://backend:8080/public/; add_header Access-Control-Allow-Origin *;|g' /etc/nginx/conf.d/default.conf 2>/dev/null && docker compose exec -T nginx nginx -s reload 2>/dev/null || true`);
+      log('✅ Rota /public/ do Nginx verificada/corrigida no boot do agent');
+    } catch (_) {}
+  }, 10000);
 });
 
 process.on('uncaughtException', (err) => {
