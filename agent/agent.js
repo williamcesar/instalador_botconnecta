@@ -658,6 +658,24 @@ async function handleListBackups(req, res) {
   }
 }
 
+// ── Status do Install Log (polling síncrono) ─────────────────────────────────
+async function handleInstallLog(req, res) {
+  try {
+    const logFile = path.join(INSTALL_DIR, 'install.log');
+    if (!fs.existsSync(logFile)) {
+      return jsonResponse(res, 200, { ok: true, lines: [], message: 'Log de instalação ainda não criado.' });
+    }
+    const content = fs.readFileSync(logFile, 'utf8');
+    const lines = content.split('\n').filter(l => l.trim());
+    const lastLines = lines.slice(-100);
+    const lastLine = lastLines[lastLines.length - 1] || '';
+    const done = lastLine.includes('concluída') || lastLine.includes('✅') || lastLine.includes('ERRO') || lastLine.includes('❌');
+    return jsonResponse(res, 200, { ok: true, lines: lastLines, done, last: lastLine });
+  } catch (err) {
+    return jsonResponse(res, 500, { ok: false, error: err.message });
+  }
+}
+
 async function handleLogs(req, res, service) {
   // Server-Sent Events para logs em tempo real
   res.writeHead(200, {
@@ -1046,6 +1064,8 @@ const server = http.createServer(async (req, res) => {
     if (path_ === '/api/migrate' && method === 'POST') return await handleMigrate(req, res);
     if (path_ === '/api/fix-nginx' && method === 'POST') return await handleFixNginx(req, res);
     if (path_ === '/api/self-update' && method === 'POST') return await handleSelfUpdate(req, res);
+
+    if (path_ === '/api/install-log' && method === 'GET') return await handleInstallLog(req, res);
 
     const logsMatch = path_.match(/^\/api\/logs\/?(.*)$/);
     if (logsMatch && method === 'GET') return await handleLogs(req, res, logsMatch[1]);
