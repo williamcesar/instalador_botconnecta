@@ -116,8 +116,9 @@ sleep 5
 
 for dom in "$DOMAIN_FRONTEND" "$DOMAIN_BACKEND" "$DOMAIN_API_OFICIAL"; do
     echo "Emitindo certificado SSL para $dom..."
-    docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email "$ADMIN_EMAIL" -d "$dom" --agree-tos --no-eff-email --force-renewal --non-interactive || \
-    docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email "$ADMIN_EMAIL" -d "$dom" --agree-tos --no-eff-email --force-renewal --non-interactive || true
+    docker compose exec -T certbot rm -rf /etc/letsencrypt/live/$dom /etc/letsencrypt/archive/$dom /etc/letsencrypt/renewal/$dom.conf 2>/dev/null || true
+    docker compose exec -T certbot certbot certonly --webroot -w /var/www/certbot --email "$ADMIN_EMAIL" -d "$dom" --agree-tos --no-eff-email --non-interactive || \
+    docker compose run --rm --no-deps certbot certonly --webroot -w /var/www/certbot --email "$ADMIN_EMAIL" -d "$dom" --agree-tos --no-eff-email --non-interactive || true
 done
 
 echo "Recarregando Nginx..."
