@@ -225,8 +225,7 @@ services:
       - certbot_conf:/etc/letsencrypt
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
     networks:
-      botconnecta:
-        ipv4_address: 172.28.1.80
+      - botconnecta
 
 # ── Volumes ──────────────────────────────────────────────────────────────────
 volumes:
