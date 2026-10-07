@@ -58,6 +58,17 @@ function exec(cmd, opts = {}) {
   }).toString().trim();
 }
 
+function cleanupDanglingNetworksAndContainers() {
+  try {
+    // 1. Remove preventivamente containers certbot temporários ou zumbis
+    exec(`docker rm -f $(docker ps -aq --filter "name=certbot-run") 2>/dev/null || true`);
+  } catch (_) {}
+  try {
+    // 2. Desconecta endpoints órfãos da rede botconnecta_botconnecta para prevenir "network has active endpoints"
+    exec(`docker network inspect botconnecta_botconnecta --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | xargs -r -n1 docker network disconnect -f botconnecta_botconnecta 2>/dev/null || true`);
+  } catch (_) {}
+}
+
 function downloadReleaseFile(releasesUrl, version, relPath, destPath, stepFn = null) {
   const candidates = [
     `${releasesUrl}/releases/${version}/${relPath}`,
@@ -215,11 +226,13 @@ async function handleInstall(req, res) {
 
   try {
     step('🧹 Limpando containers e volumes anteriores para instalação limpa...');
+    cleanupDanglingNetworksAndContainers();
     try {
       exec(`docker compose down -v`);
     } catch (cleanErr) {
       log(`Aviso ao limpar volumes anteriores: ${cleanErr.message}`);
     }
+    cleanupDanglingNetworksAndContainers();
 
     // Cria diretórios
     fs.mkdirSync(INSTALL_DIR, { recursive: true });
@@ -238,12 +251,28 @@ async function handleInstall(req, res) {
     exec(`chmod +x docker/postgres/init-multiple-dbs.sh`);
 
     step('📝 Criando arquivo .env...');
+    // Higienização de senhas: remove apenas quebras de linha e aspas para manter caracteres especiais válidos
     if (envVars.POSTGRES_PASSWORD) {
-      envVars.POSTGRES_PASSWORD = envVars.POSTGRES_PASSWORD.replace(/[^a-zA-Z0-9_-]/g, 'X');
+      envVars.POSTGRES_PASSWORD = envVars.POSTGRES_PASSWORD.replace(/[\r\n'"]/g, '');
     }
     if (envVars.REDIS_PASSWORD) {
-      envVars.REDIS_PASSWORD = envVars.REDIS_PASSWORD.replace(/[^a-zA-Z0-9_-]/g, 'X');
+      envVars.REDIS_PASSWORD = envVars.REDIS_PASSWORD.replace(/[\r\n'"]/g, '');
     }
+
+    // Garante que variáveis opcionais existam no .env para evitar warnings do docker-compose
+    const defaultOptionalVars = [
+      'REQUIRE_BUSINESS_MANAGEMENT', 'USER_LIMIT', 'CONNECTIONS_LIMIT', 'CLOSED_SEND_BY_ME',
+      'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT',
+      'MAIL_HOST', 'MAIL_PORT', 'MAIL_USER', 'MAIL_PASS', 'MAIL_FROM',
+      'MPACCESSTOKEN', 'ASAAS_TOKEN', 'STRIPE_PRIVATE', 'SOCKET_ADMIN',
+      'OFFICIAL_CAMPAIGN_CONCURRENCY'
+    ];
+    for (const v of defaultOptionalVars) {
+      if (envVars[v] === undefined) {
+        envVars[v] = '';
+      }
+    }
+
     const envContent = Object.entries(envVars)
       .map(([k, v]) => `${k}=${v}`)
       .join('\n');
@@ -259,12 +288,13 @@ async function handleInstall(req, res) {
     const domains = [envVars.DOMAIN_FRONTEND, envVars.DOMAIN_BACKEND, envVars.DOMAIN_API_OFICIAL].filter(Boolean);
     for (const dom of domains) {
       try {
-        exec(`docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
+        exec(`docker compose run --rm --no-deps --network none --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
       } catch (sslErr) {
         log(`Aviso ao criar certificado temporário para ${dom}: ${sslErr.message}`);
       }
     }
 
+    cleanupDanglingNetworksAndContainers();
     step('🚀 Subindo banco de dados e cache (PostgreSQL e Redis)...');
     exec(`docker compose up -d postgres redis`);
 
@@ -288,7 +318,11 @@ async function handleInstall(req, res) {
     const dbOficial = envVars.DB_NAME_OFICIAL || 'botconnecta_oficial';
     if (pgPass) {
       try {
-        exec(`docker compose exec -T postgres psql -U ${pgUser} -d template1 -c "ALTER USER \\"${pgUser}\\" WITH PASSWORD '${pgPass}';"`);
+        try {
+          exec(`docker compose exec -T postgres psql -U ${pgUser} -d template1 -c "ALTER USER \\"${pgUser}\\" WITH PASSWORD '${pgPass}';"`);
+        } catch (_) {
+          exec(`docker compose exec -T postgres psql -U postgres -d template1 -c "ALTER USER \\"${pgUser}\\" WITH PASSWORD '${pgPass}';" 2>/dev/null || true`);
+        }
         log('Senha do PostgreSQL sincronizada com o .env');
       } catch (pwErr) {
         log(`Aviso ao sincronizar senha do postgres: ${pwErr.message}`);
@@ -457,7 +491,7 @@ async function handleUpdate(req, res) {
         const domains = [domFront, domBack, domApi].filter(Boolean);
         for (const dom of domains) {
           try {
-            exec(`docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
+            exec(`docker compose run --rm --no-deps --network none --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
           } catch (_) {}
         }
       }
@@ -465,6 +499,7 @@ async function handleUpdate(req, res) {
       log(`Aviso bootstrap SSL: ${sslErr.message}`);
     }
 
+    cleanupDanglingNetworksAndContainers();
     step('🚀 Atualizando e iniciando containers...');
     exec(`docker compose up -d --remove-orphans`);
 
@@ -742,16 +777,18 @@ async function handleSsl(req, res) {
   const certEmail = envVars.API_OFICIAL_ADMIN_EMAIL || envVars.MAIL_FROM || ('admin@' + (envVars.DOMAIN_FRONTEND || 'botconnecta.com.br'));
 
   log(`🔒 Iniciando emissão de certificados SSL para: ${domains.join(', ')}`);
+  cleanupDanglingNetworksAndContainers();
 
   // Garante bootstrap se algum não existir para o Nginx poder subir
   for (const dom of domains) {
     try {
-      exec(`docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
+      exec(`docker compose run --rm --no-deps --network none --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
     } catch (bootstrapErr) {
       log(`Aviso bootstrap SSL ${dom}: ${bootstrapErr.message}`);
     }
   }
 
+  cleanupDanglingNetworksAndContainers();
   try {
     exec(`docker compose up -d nginx certbot`);
   } catch (upErr) {
@@ -790,15 +827,11 @@ async function handleSsl(req, res) {
 async function handleCleanDb(req, res) {
   jsonResponse(res, 202, { ok: true, message: 'Reset do banco e instalação limpa iniciada' });
 
+  cleanupDanglingNetworksAndContainers();
   const envPath = path.join(INSTALL_DIR, '.env');
   let envVars = {};
   if (fs.existsSync(envPath)) {
-    let raw = fs.readFileSync(envPath, 'utf8');
-    if (raw.includes('+') || raw.includes('/')) {
-      raw = raw.replace(/\+/g, 'X').replace(/\//g, 'Y');
-      fs.writeFileSync(envPath, raw, 'utf8');
-      log('✓ Caracteres especiais na senha do .env sanitizados');
-    }
+    const raw = fs.readFileSync(envPath, 'utf8');
     raw.split('\n').forEach(line => {
       const idx = line.indexOf('=');
       if (idx > 0) envVars[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
@@ -807,7 +840,9 @@ async function handleCleanDb(req, res) {
 
   try {
     log('🧹 Reiniciando banco do zero (removendo volumes antigos)...');
+    cleanupDanglingNetworksAndContainers();
     exec(`docker compose down -v`);
+    cleanupDanglingNetworksAndContainers();
     exec(`docker compose up -d postgres redis`);
 
     const pgUser = envVars.POSTGRES_USER || 'botconnecta';
@@ -825,7 +860,11 @@ async function handleCleanDb(req, res) {
 
     if (pgPass) {
       try {
-        exec(`docker compose exec -T postgres psql -U ${pgUser} -d template1 -c "ALTER USER \\"${pgUser}\\" WITH PASSWORD '${pgPass}';"`);
+        try {
+          exec(`docker compose exec -T postgres psql -U ${pgUser} -d template1 -c "ALTER USER \\"${pgUser}\\" WITH PASSWORD '${pgPass}';"`);
+        } catch (_) {
+          exec(`docker compose exec -T postgres psql -U postgres -d template1 -c "ALTER USER \\"${pgUser}\\" WITH PASSWORD '${pgPass}';" 2>/dev/null || true`);
+        }
       } catch (pwErr) {
         log(`Aviso ao sincronizar senha do postgres: ${pwErr.message}`);
       }
@@ -864,12 +903,13 @@ async function handleCleanDb(req, res) {
     const domains = [envVars.DOMAIN_FRONTEND, envVars.DOMAIN_BACKEND, envVars.DOMAIN_API_OFICIAL].filter(Boolean);
     for (const dom of domains) {
       try {
-        exec(`docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
+        exec(`docker compose run --rm --no-deps --network none --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/${dom} && if [ ! -f /etc/letsencrypt/live/${dom}/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/${dom}/privkey.pem -out /etc/letsencrypt/live/${dom}/fullchain.pem -subj '/CN=${dom}'; fi"`);
       } catch (sslErr) {
         log(`Aviso bootstrap SSL ${dom}: ${sslErr.message}`);
       }
     }
 
+    cleanupDanglingNetworksAndContainers();
     log('🚀 Subindo todos os containers...');
     exec(`docker compose up -d`);
     execSync('sleep 5');

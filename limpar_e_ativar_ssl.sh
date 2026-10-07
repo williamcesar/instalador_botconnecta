@@ -105,7 +105,7 @@ echo -e "${CYAN}=====================================================${NC}"
 echo -e "${CYAN}▶ 10/11. Gerando certificados bootstrap para inicialização do Nginx...${NC}"
 echo -e "${CYAN}=====================================================${NC}"
 for dom in "$DOMAIN_FRONTEND" "$DOMAIN_BACKEND" "$DOMAIN_API_OFICIAL"; do
-    docker compose run --rm --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/$dom && if [ ! -f /etc/letsencrypt/live/$dom/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/$dom/privkey.pem -out /etc/letsencrypt/live/$dom/fullchain.pem -subj '/CN=$dom'; fi"
+    docker compose run --rm --no-deps --network none --entrypoint sh certbot -c "mkdir -p /etc/letsencrypt/live/$dom && if [ ! -f /etc/letsencrypt/live/$dom/fullchain.pem ]; then openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /etc/letsencrypt/live/$dom/privkey.pem -out /etc/letsencrypt/live/$dom/fullchain.pem -subj '/CN=$dom'; fi"
 done
 
 echo -e "${CYAN}=====================================================${NC}"
