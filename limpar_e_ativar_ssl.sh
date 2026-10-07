@@ -49,9 +49,9 @@ export ADMIN_PASSWORD=$(grep -E '^(API_OFICIAL_ADMIN_PASSWORD|ADMIN_PASSWORD)=' 
 echo -e "${CYAN}=====================================================${NC}"
 echo -e "${CYAN}▶ 3/11. Baixando docker-compose.yml atualizado...${NC}"
 echo -e "${CYAN}=====================================================${NC}"
-curl -fsSL https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main/releases/1.0.0/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main/releases/latest/docker-compose.yml -o docker-compose.yml
 mkdir -p docker/postgres
-curl -fsSL https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main/releases/1.0.0/docker/postgres/init-multiple-dbs.sh -o docker/postgres/init-multiple-dbs.sh
+curl -fsSL https://raw.githubusercontent.com/williamcesar/instalador_botconnecta/main/releases/latest/docker/postgres/init-multiple-dbs.sh -o docker/postgres/init-multiple-dbs.sh
 chmod +x docker/postgres/init-multiple-dbs.sh
 echo -e "${GREEN}✓ docker-compose.yml e scripts atualizados!${NC}"
 
