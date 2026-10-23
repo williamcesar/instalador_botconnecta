@@ -259,6 +259,22 @@ async function handleInstall(req, res) {
       envVars.REDIS_PASSWORD = envVars.REDIS_PASSWORD.replace(/[\r\n'"]/g, '');
     }
 
+    // Auto-gerar chaves VAPID para Web Push caso não tenham sido informadas
+    if (!envVars.VAPID_PUBLIC_KEY || !envVars.VAPID_PRIVATE_KEY) {
+      try {
+        const ecdh = crypto.createECDH('prime256v1');
+        ecdh.generateKeys();
+        envVars.VAPID_PUBLIC_KEY = ecdh.getPublicKey('base64url');
+        envVars.VAPID_PRIVATE_KEY = ecdh.getPrivateKey('base64url');
+        if (!envVars.VAPID_SUBJECT) {
+          envVars.VAPID_SUBJECT = `mailto:admin@${envVars.DOMAIN_BACKEND || 'botconnecta.com.br'}`;
+        }
+        log('🔑 Chaves VAPID Web Push geradas automaticamente');
+      } catch (err) {
+        log('⚠️ Erro ao gerar VAPID keys automaticamente: ' + err.message);
+      }
+    }
+
     // Garante que variáveis opcionais existam no .env para evitar warnings do docker-compose
     const defaultOptionalVars = [
       'REQUIRE_BUSINESS_MANAGEMENT', 'USER_LIMIT', 'CONNECTIONS_LIMIT', 'CLOSED_SEND_BY_ME',
